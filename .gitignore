@@ -42,3 +42,6 @@ dist/
 .DS_Store
 Thumbs.db
 Scripts/
+
+# Streamlit secrets file
+.streamlit/secrets.toml
