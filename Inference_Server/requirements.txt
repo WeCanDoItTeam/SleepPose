@@ -3,3 +3,7 @@ uvicorn[standard]
 ultralytics
 opencv-python
 numpy
+timm
+scikit-learn
+seaborn
+matplotlib

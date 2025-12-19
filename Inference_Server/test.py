@@ -4,10 +4,26 @@ from ultralytics import YOLO
 from datetime import datetime, timedelta
 
 # =========================
+# COCO 17 Keypoints Skeleton
+# =========================
+SKELETON = [
+    (5, 7), (7, 9),        # Left arm
+    (6, 8), (8, 10),       # Right arm
+    (11, 13), (13, 15),    # Left leg
+    (12, 14), (14, 16),    # Right leg
+    (5, 6),                # Shoulders
+    (11, 12),              # Hips
+    (5, 11),               # Left torso
+    (6, 12),               # Right torso
+]
+
+
+# =========================
 # 설정값
 # =========================
-video_path = "downloads/TEST_0.mp4"
-model_path = "pose_pt/pose_011/weights/best.pt"
+test_path = "yolo11n-pose.pt"
+video_path = "downloads/TEST_4.mp4"
+model_path = "pose_pt/pose_06/weights/best.pt"
 
 IMG_SIZE = 640
 FRAME_SKIP = 1
@@ -21,7 +37,7 @@ IOU_THRES = 0.5
 cap = cv2.VideoCapture(video_path)
 fps = cap.get(cv2.CAP_PROP_FPS)
 
-model = YOLO(model_path)
+model = YOLO(test_path)
 names = model.names
 
 # 🔴 영상 시작 datetime (기준 시각)
@@ -85,15 +101,36 @@ while True:
                     )
 
             # =========================
-            # 키포인트 그리기
+            # 키포인트 + 스켈레톤 그리기
             # =========================
             if r.keypoints is not None and len(r.keypoints.xy) > 0:
                 keypoints = r.keypoints.xy.cpu().numpy()
-                for person_kps in keypoints:
-                    for x, y in person_kps:
-                        x, y = int(x), int(y)
-                        cv2.circle(input_frame, (x, y), 3, (0, 0, 255), -1)
 
+                for person_kps in keypoints:
+                    # 1️⃣ 키포인트 점
+                    for x, y in person_kps:
+                        if x > 0 and y > 0:
+                            cv2.circle(
+                                input_frame,
+                                (int(x), int(y)),
+                                3,
+                                (0, 0, 255),
+                                -1
+                            )
+
+                    # 2️⃣ 관절 연결 선
+                    for kp1, kp2 in SKELETON:
+                        x1, y1 = person_kps[kp1]
+                        x2, y2 = person_kps[kp2]
+
+                        if x1 > 0 and y1 > 0 and x2 > 0 and y2 > 0:
+                            cv2.line(
+                                input_frame,
+                                (int(x1), int(y1)),
+                                (int(x2), int(y2)),
+                                (255, 0, 0),
+                                2
+                            )
 
     # =========================
     # 자세 구간 추적 로직
