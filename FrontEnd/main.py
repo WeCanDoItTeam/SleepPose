@@ -16,6 +16,8 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = None
     st.session_state.page = 'login'
+    
+    
 
 def login_form():
     """로그인 폼을 표시하고 인증을 처리합니다."""
@@ -33,7 +35,7 @@ def login_form():
             # 2.1: 등록된 가입자인지 확인
             query = "SELECT user_id, user_passwd FROM users WHERE user_id = %s"
             user_data = db_utils.execute_query(query, (user_id,), fetch_one=True)
-            
+            print(user_data)
             if user_data and user_data['user_passwd'] == user_passwd:
                 st.session_state.logged_in = True
                 st.session_state.user_id = user_id
@@ -52,7 +54,7 @@ def login_form():
 
 # --- 페이지 라우팅 ---
 if st.session_state.page == 'login':
-    db_utils.initialize_db() # DB 초기화 체크
+    # db_utils.initialize_db() # DB 초기화 체크
     login_form()
 elif st.session_state.page == 'account_creation':
     account.account_creation_window()

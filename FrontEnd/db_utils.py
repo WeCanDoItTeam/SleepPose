@@ -2,21 +2,13 @@
 import mariadb
 import streamlit as st
 import pandas as pd
-
+import connect_pool as dbPool
 def get_db_connection():
     """데이터베이스 연결 객체를 반환합니다. (매번 새로 연결하여 안정성 확보)"""
     try:
-        # .streamlit/secrets.toml의 정보를 가져옴
-        db_info = st.secrets["mariadb"]
-        
-        conn = mariadb.connect(
-            host=db_info["host"],
-            port=db_info["port"],
-            user=db_info["user"],
-            password=db_info["password"],
-            database=db_info["database"]
-        )
-        return conn
+        pool = dbPool.DBPool()               # 싱글톤 풀 인스턴스
+        return pool.get_connection()  # 여기서 "진짜 커넥션"을 리턴
+     
     except mariadb.Error as e:
         st.error(f"MariaDB 연결 오류: {e}")
         return None
@@ -31,7 +23,6 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         # dictionary=True 옵션을 주면 결과값을 {'column': value} 형태로 받아올 수 있어 편리합니다.
         cursor = conn.cursor(dictionary=True)
         cursor.execute(query, params)
-        
         if fetch_one:
             result = cursor.fetchone()
         elif fetch_all:
@@ -41,6 +32,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             result = True
             
         cursor.close()
+        conn.close()
         return result
     except mariadb.Error as e:
         st.error(f"쿼리 실행 오류: {e}")
