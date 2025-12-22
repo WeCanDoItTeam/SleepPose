@@ -854,7 +854,7 @@ if __name__ == '__main__':
     pt_name = "sleep_pose_best_model.pt"
 
     # 학습시키기
-    train()
+    # train()
 
     # 실행
     # check_device()
@@ -886,13 +886,13 @@ if __name__ == '__main__':
     #         print(f"{img_name}: {cls_name} (클래스 ID: {cls_id})")
 
 
-    #predict video
-    # preds = predict_video(
-    #     video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\downloads\{name}",
-    #     yolo_weights="yolo11n-pose.pt",
-    #     hybrid_weights=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_2_12e_rl1e-4_best\{pt_name}",
-    #     output_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\infer_video\{name}"
-    # )
-    # visualize_preds(preds, save_path="sleep_pose_timeline.jpg")
-    # visualize_pred_distribution(preds)
-    # visualize_pred_ratio(preds, fps=30)
+    # predict video
+    preds = predict_video(
+        video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\stand.mp4",
+        yolo_weights="yolo11n-pose.pt",
+        hybrid_weights=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_4_22e_rl1e-4_best\{pt_name}",
+        #output_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\infer_video\{name}"
+    )
+    visualize_preds(preds, save_path="sleep_pose_timeline.jpg")
+    visualize_pred_distribution(preds)
+    visualize_pred_ratio(preds, fps=30)

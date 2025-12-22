@@ -72,7 +72,7 @@ async def end_inference():
     }
 
 # 현재 상태 확인용 엔드포인트 (스트림릿에서 유용함)
-@app.get("/status")
+@app.get("/")
 async def get_status():
     return {
         "inference_running": state.inference_running,
