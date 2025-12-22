@@ -44,8 +44,8 @@ def predict_with_distinction(model, img, kpts, device):
         probs = torch.softmax(logits, dim=1)[0]
         pred = int(torch.argmax(probs))
     
-    if probs[pred] < CONF_THRES:
-        pred = rule_based_postprocess(kpts)
+    # if probs[pred] < CONF_THRES:
+    #     pred = rule_based_postprocess(kpts)
         
     return pred # 신뢰도가 높으면 그대로 반환
 
@@ -102,6 +102,9 @@ def rule_based_postprocess(kpts_tensor):
 
 # 이미지 크롭
 def crop_image(img, bbox):
+    if img is None:
+        return None
+    
     x1, y1, x2, y2 = bbox
     h, w = img.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
@@ -202,7 +205,7 @@ def save_to_mariadb(user_id, sleep_data_list):
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_id: int):
 
     if DEBUG_MODE:
-        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\stand.mp4")
+        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4")
     else:
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
@@ -238,22 +241,23 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_i
     ]
 
     detected_pose = 4 # 기본값 (others)
-
     try:
         while not stop_flag():
             if DEBUG_MODE:
-                ret, raw_frame = cap.read()
+                ret, frame = cap.read()
+                if not ret or frame is None: 
+                    print("🛑 DEBUG video ended") 
+                    break
             else:
                 raw_frame = process.stdout.read(FRAME_SIZE)
-
-            if len(raw_frame) != FRAME_SIZE: break
+                if len(raw_frame) != FRAME_SIZE: break
+                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
             frame_count += 1
             # 15fps 중 3fps 추론 (5프레임마다 1번)
             if frame_count % FRAME_SKIP != 0:
                 continue
 
-            frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
             now = datetime.datetime.now()
 
             # ===== YOLO 추론 =====
@@ -272,7 +276,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_i
                 kpts_n = torch.cat([kpts_norm, kpts_conf], dim=1)
 
                 img_t, kpt_t = build_hybrid_inputs(frame, bbox_pixel, bbox_norm, kpts_n, device)
-                if img_t is None or kpt_tis is None: continue
+                if img_t is None or kpt_t is None: continue
                 detected_pose = predict_with_distinction(hybrid_model, img_t, kpt_t, device)
             else:
                 # [사람이 없을 때] 강제로 Others(4) 처리
@@ -302,6 +306,8 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_i
                 consistent_count = 0
                 pending_pose = None
 
+    finally:
+        
         # 반복문 종료 시 마지막 자세 저장
         if current_pose != INF:
             sleep_timeline.append({
@@ -309,9 +315,8 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_i
                 'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
                 'end': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             })
-
-    finally:
-        process.terminate()
+        if stop_flag() and not DEBUG_MODE:
+            process.terminate()
         cv2.destroyAllWindows() # (디버깅용)
         
         # 차곡차곡 쌓인 데이터를 DB로 전송

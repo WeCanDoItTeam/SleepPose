@@ -385,59 +385,63 @@ def predict_with_distinction(model, img, kpts, device, conf_thres=0.3):
         probs = torch.softmax(logits, dim=1)[0]
         pred = int(torch.argmax(probs))
     
-    if probs[pred] < conf_thres:
-        pred = rule_based_postprocess(kpts)
+    # if probs[pred] < conf_thres:
+    pred = rule_based_postprocess(kpts)
         
     return pred # 신뢰도가 높으면 그대로 반환
 
 # 룰 기반 결과 보정
-def rule_based_postprocess(kpts, conf_thres=0.3):
-
+def rule_based_postprocess(kpts, conf_thres=0.3, shoulder_parallel_deg=15):
     if kpts.size != 55:
-        return None
-     
-    # kpts 55개
-    kpts = kpts[4:]
-    kpts = kpts.reshape(17,3)
+        return 4
 
+    # bbox 제거
+    kpts = kpts[4:].reshape(17, 3)
+
+    # 주요 키포인트
     nose = kpts[0]
+    l_eye, r_eye = kpts[1], kpts[2]
     l_shoulder, r_shoulder = kpts[5], kpts[6]
     l_wrist, r_wrist = kpts[9], kpts[10]
-    l_hip, r_hip = kpts[11], kpts[12]
 
-    shoulder_width = abs(l_shoulder[0] - r_shoulder[0])
-    torso_vec = np.array([(l_hip[0]+r_hip[0])/2 - (l_shoulder[0]+r_shoulder[0])/2,
-                          (l_hip[1]+r_hip[1])/2 - (l_shoulder[1]+r_shoulder[1])/2])
-    torso_len = np.linalg.norm(torso_vec)
-    torso_angle = np.arctan2(torso_vec[1], torso_vec[0]) * 180 / np.pi
+    # =========================
+    # STEP 1. 앞/뒤 판별
+    # =========================
+    face_conf_cnt = sum([
+        nose[2] > conf_thres,
+        l_eye[2] > conf_thres,
+        r_eye[2] > conf_thres
+    ])
 
-    # -----------------------------
-    # 1) Lying 먼저 체크 (바로 누움)
-    # torso 거의 수평, shoulder 넓음, 손목이 얼굴 위가 아닌 경우
-    if abs(torso_angle) < 20 and shoulder_width > torso_len * 0.5 and \
-       not ((l_wrist[2] > conf_thres and l_wrist[1] < l_shoulder[1]) or \
-            (r_wrist[2] > conf_thres and r_wrist[1] < r_shoulder[1])):
-        return 0  # lying
+    is_front = face_conf_cnt >= 2
 
-    # -----------------------------
-    # 2) Hand-up
-    if (l_wrist[2] > conf_thres and l_wrist[1] < l_shoulder[1]) or \
-       (r_wrist[2] > conf_thres and r_wrist[1] < r_shoulder[1]):
-        return 2  # handup
+    # =========================
+    # STEP 2. 앞을 보고 있는 경우
+    # =========================
+    if is_front:
+        # 어깨선 기울기
+        dx = r_shoulder[0] - l_shoulder[0]
+        dy = r_shoulder[1] - l_shoulder[1]
+        shoulder_angle = np.degrees(np.arctan2(dy, dx))
 
-    # -----------------------------
-    # 3) Back (엎드림)
-    if nose[2] < conf_thres and (l_shoulder[2] > conf_thres or r_shoulder[2] > conf_thres):
-        return 3  # back
+        is_parallel = abs(shoulder_angle) < shoulder_parallel_deg
 
-    # -----------------------------
-    # 4) Side
-    if 45 < abs(torso_angle) < 135 and shoulder_width < torso_len * 0.7:
-        return 1  # side
+        # 손목 위치
+        wrist_up = (
+            (l_wrist[2] > conf_thres and l_wrist[1] < l_shoulder[1]) or
+            (r_wrist[2] > conf_thres and r_wrist[1] < r_shoulder[1])
+        )
 
-    # -----------------------------
-    # 5) 기타
-    return 4
+        if is_parallel:
+            return 2 if wrist_up else 0
+        else:
+            return 1  # 옆으로 누움
+
+    # =========================
+    # STEP 3. 얼굴 안 보임 → 엎드림
+    # =========================
+    return 3
+
 
 # 학습에서 쓰이는 평가 메서드
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, confusion_matrix
@@ -888,7 +892,7 @@ if __name__ == '__main__':
 
     # predict video
     preds = predict_video(
-        video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\stand.mp4",
+        video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Lee.mp4",
         yolo_weights="yolo11n-pose.pt",
         hybrid_weights=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_4_22e_rl1e-4_best\{pt_name}",
         #output_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\infer_video\{name}"

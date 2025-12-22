@@ -17,34 +17,40 @@ class GlobalState:
 
 state = GlobalState()
 
-def inference_loop(rtsp_url: str):
+def inference_loop(rtsp_url: str, user_id: str):
     # 전역 상태를 참조하여 루프 실행
-    try:
-        run_ffmpeg_yolo(
-            rtsp_url=rtsp_url,
-            ffmpeg_path=FFMPEG_PATH,
-            stop_flag=lambda: not state.inference_running
-        )
+    # try:
+    run_ffmpeg_yolo(
+        rtsp_url=rtsp_url,
+        ffmpeg_path=FFMPEG_PATH,
+        stop_flag=lambda: not state.inference_running,
+        user_id= user_id
+    )
 
         # 여기서 오디오 추론 메서드 실행
 
-    finally:
-        state.inference_running = False
-        print("Inference loop terminated.")
+    # finally:
+    #     state.inference_running = False
+    #     print("Inference loop terminated.")
+
+class UserData(BaseModel):
+    user_id: str
+    password: str
+    ip: str
 
 @app.post("/start")
-async def start_inference(user_id: str, password: str, ip: str):
+async def start_inference(userData: UserData):
     if state.inference_running:
         return 400 # 이미 실행 중이면 400 에러 반환
 
-    rtsp_url = f"rtsp://{user_id}:{password}@{ip}:554/stream2"
+    rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
 
     state.stream_start_time = datetime.now()
     state.inference_running = True
 
     state.inference_thread = threading.Thread(
         target=inference_loop,
-        args=(rtsp_url,),
+        args=(rtsp_url,userData.user_id),
         daemon=True
     )
     state.inference_thread.start()
