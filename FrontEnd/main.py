@@ -4,6 +4,7 @@ import db_utils
 import account
 import monitor
 import report
+import summaryReport
 
 # Streamlit 애플리케이션 설정
 st.set_page_config(
@@ -72,7 +73,13 @@ elif st.session_state.page == 'report':
         st.session_state.page = 'login'
         st.warning("로그인이 필요합니다.")
         st.rerun()
-
+elif st.session_state.page == 'summaryReport':
+    if st.session_state.logged_in:
+        summaryReport.report_window()
+    else:
+        st.session_state.page = 'login'
+        st.warning("로그인이 필요합니다.")
+        st.rerun()        
 # 로그아웃 버튼 (로그인 시에만 사이드바에 표시)
 if st.session_state.logged_in:
     def logout():

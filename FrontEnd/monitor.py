@@ -221,12 +221,16 @@ def monitoring_window():
                 st.rerun()
 
         st.divider()
-        
-        # 5.2 모니터링 제어 섹션 - 시작 버튼 (설정창 아래에 배치)
-        if st.button("▶️ 모니터링 시작", use_container_width=True, key="btn_start_monitoring"):
-            start_monitoring_callback(new_uid, new_upw, new_ip)
-            st.rerun()
-
+        col1, col2 = st.columns(2)
+        with col1:
+            # 5.2 모니터링 제어 섹션 - 시작 버튼 (설정창 아래에 배치)
+            if st.button("▶️ 모니터링 시작", use_container_width=True, key="btn_start_monitoring"):
+                start_monitoring_callback(new_uid, new_upw, new_ip)
+                st.rerun()
+        with col2:
+            if st.button("🔄 리포트 통계", use_container_width=True):
+                st.session_state.page = 'summaryReport'
+                st.rerun()          
     else:
         # 2. 모니터링 중: 실시간 분석 현황(그래프)을 최상단에 배치
         st.subheader("📊 실시간 분석 현황 (최근 10분)")
