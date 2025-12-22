@@ -2,21 +2,13 @@
 import mariadb
 import streamlit as st
 import pandas as pd
-
+import connect_pool as dbPool
 def get_db_connection():
     """데이터베이스 연결 객체를 반환합니다. (매번 새로 연결하여 안정성 확보)"""
     try:
-        # .streamlit/secrets.toml의 정보를 가져옴
-        db_info = st.secrets["mariadb"]
-        
-        conn = mariadb.connect(
-            host=db_info["host"],
-            port=db_info["port"],
-            user=db_info["user"],
-            password=db_info["password"],
-            database=db_info["database"]
-        )
-        return conn
+        pool = dbPool.DBPool()               # 싱글톤 풀 인스턴스
+        return pool.get_connection()  # 여기서 "진짜 커넥션"을 리턴
+     
     except mariadb.Error as e:
         st.error(f"MariaDB 연결 오류: {e}")
         return None
@@ -31,7 +23,6 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         # dictionary=True 옵션을 주면 결과값을 {'column': value} 형태로 받아올 수 있어 편리합니다.
         cursor = conn.cursor(dictionary=True)
         cursor.execute(query, params)
-        
         if fetch_one:
             result = cursor.fetchone()
         elif fetch_all:
@@ -41,6 +32,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             result = True
             
         cursor.close()
+        conn.close()
         return result
     except mariadb.Error as e:
         st.error(f"쿼리 실행 오류: {e}")
@@ -93,6 +85,74 @@ def get_sleep_data(user_id, limit=50):
         if conn:
             conn.close()
 
+def get_sleep_day(user_id,st_dt,ed_dt):
+    """
+    monitor.py에서 차트를 그리기 위해 사용.
+    최신 데이터를 판다스 데이터프레임으로 반환합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # 1. 자세 데이터 가져오기
+        pose_query = """
+            SELECT st_dt, pose_class, ed_dt
+            FROM sleep_pose2
+            WHERE user_id = %s 
+            AND st_dt BETWEEN %s AND %s
+        """
+        st_dt = st_dt + " 13:00:00"
+        ed_dt = ed_dt + " 13:00:00"
+        cursor.execute(pose_query, (user_id, st_dt, ed_dt))
+        data = cursor.fetchall()
+        return data
+    except Exception as e:
+        st.error(f"데이터 프레임 로드 실패: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()            
+
+def get_sleep_month(user_id,st_dt,ed_dt):
+    """
+    monitor.py에서 차트를 그리기 위해 사용.
+    최신 데이터를 판다스 데이터프레임으로 반환합니다.
+    """
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # 1. 자세 데이터 가져오기
+        pose_query = """
+            SELECT pose_class,c.code_nm as pose_nm,
+                DATE_FORMAT(st_dt, '%H') AS hour_slot,
+                SUM(TIMESTAMPDIFF(SECOND, st_dt, ed_dt))/60 AS minutes
+            FROM sleep_pose2 t
+            left outer join comm_code c on t.pose_class = c.code_id and c.code_cd='pose'
+            WHERE st_dt BETWEEN %s AND %s
+            AND user_id = %s
+            GROUP BY hour_slot, pose_class, code_nm
+        """
+        st_dt = st_dt + " 13:00:00"
+        ed_dt = ed_dt + " 13:00:00"
+        cursor.execute(pose_query, (st_dt, ed_dt,user_id))
+        data = cursor.fetchall()
+        return data
+    except Exception as e:
+        st.error(f"데이터 프레임 로드 실패: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()             
+            
 def initialize_db():
     """앱 시작 시 테이블 구조를 자동으로 생성/확인합니다."""
     # 사용자의 코드와 동일하게 유지하되, dictionary=True 관련 이슈 방지를 위해 일반 cursor 사용
@@ -137,6 +197,7 @@ def initialize_db():
         """)
         conn.commit()
         cursor.close()
+        
     except mariadb.Error as e:
         st.error(f"DB 초기화 실패: {e}")
     finally:
