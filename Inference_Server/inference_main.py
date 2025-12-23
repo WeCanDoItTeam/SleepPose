@@ -2,8 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 import threading
-from inference.inference_pose import run_ffmpeg_yolo
-from FrontEnd.db_utils import *
+from Inference_Server.inference.inference_pose import run_ffmpeg_yolo
 
 app = FastAPI()
 
@@ -43,7 +42,7 @@ class UserData(BaseModel):
 @app.post("/start")
 async def start_inference(userData: UserData):
     if state.inference_running:
-        return 400 # 이미 실행 중이면 400 에러 반환
+        return {"code": 400} # 이미 실행 중이면 400 에러 반환
 
     rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
 
@@ -57,27 +56,18 @@ async def start_inference(userData: UserData):
     )
     state.inference_thread.start()
 
-    return {
-        "status": 200,
-        "message": "Stream connected and inference started",
-        "start_time": state.stream_start_time
-    }
+    return {"code": 200}
 
 @app.post("/end")
 async def end_inference():
     if not state.inference_running:
-        return 500 # 종료 할 스트림이 없음 (예시 리턴입니다)
+        return {"code": 500} # 종료 할 스트림이 없음 (예시 리턴입니다)
 
     state.inference_running = False
     state.stream_end_time = datetime.now()
 
     # 스레드가 종료될 때까지 기다리지 않고 즉시 응답 (데몬 스레드이므로 플래그에 의해 종료됨)
-    return {
-        "status": 200,
-        "start_time": state.stream_start_time.isoformat(),
-        "end_time": state.stream_end_time.isoformat(),
-        "message": "Inference stopped. Use these timestamps to query DB."
-    }
+    return {"code": 200}
 
 # 현재 상태 확인용 엔드포인트 (스트림릿에서 유용함)
 @app.get("/")

@@ -9,8 +9,9 @@ import plotly.graph_objects as go
 from loadbox import LoadBox   # LoadBox 클래스 임포트   
 
 # FastAPI 설정
-BE_START_URL = "http://127.0.0.1:8000/start"
-BE_END_URL = "http://127.0.0.1:8000/end"
+IP = "http://192.168.0.14:8000/"
+BE_START_URL = IP + "start"
+BE_END_URL = IP + "end"
 
 # 그래프 Y축 라벨 정의
 POSE_LABELS = {0: "바로 누운 자세", 1: "옆으로 누워자기", 2: "팔든 자세", 3: "엎드린 자세", 4: "이외 자세"}
@@ -30,12 +31,13 @@ def start_monitoring_callback(new_uid, new_upw, new_ip):
     try:
         response = requests.post(BE_START_URL, json=payload)
 
-        if response.status_code == 200 and response.json().get("result") is True:
+        if response.json().get("code") == 200:
             st.toast("모니터링을 시작합니다.")
 
             st.session_state.is_analyzing = True
             st.session_state.start_time = time.time()
-        elif response.status_code == 400:
+            st.session_state.start_time_dt = datetime.now() # 리포트(datetime) 조회를 위해 추가
+        elif response.json().get("code") == 400:
             st.toast("이미 모니터링 중입니다!")
     except Exception as e:
         st.error(f"백엔드 연결 실패: {e}")
@@ -71,15 +73,15 @@ def stop_monitoring_callback():
         
         # 리포트 조회를 위해 종료 시간 기록 (TypeError 방지를 위해 _dt 통일 권장)
         response = requests.post(BE_END_URL)
-        if response.status_code == 200 and response.json().get("result") is True:
+        if response.json().get("code") == 200:
             st.toast("모니터링이 종료되었습니다.")
-            
+
             st.session_state.last_report_data = response.json()
             
             st.session_state.end_time_dt = datetime.now() 
             st.session_state.is_analyzing = False
             st.session_state.page = "report" # 리포트 페이지로 이동
-        elif response.status_code == 500:
+        elif response.json().get("code") == 500:
             st.toast("종료할 모니터링 스트림이 없습니다!")
      
     except Exception as e:

@@ -1,14 +1,12 @@
 import subprocess
 import numpy as np
 import cv2
-import datetime
+from datetime import datetime
 from ultralytics import YOLO
 import torch
 from torchvision import transforms
 import torch.nn as nn
 import timm
-from inference_main import get_db_connection
-from util_infer import *
 
 # 디버그 모드 (비디오 재생)
 DEBUG_MODE = True
@@ -179,8 +177,6 @@ class SleepPoseNet(nn.Module):
         f_kpt = self.kpt_enc(kpts)
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
-
-
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 hybrid_weights = r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_4_22e_rl1e-4_best\sleep_pose_best_model.pt"
 
@@ -202,42 +198,42 @@ def save_to_mariadb(login_id, sleep_data_list):
 
     print(f"\n💾 [DB 저장] 유저 {login_id} 수면 기록 {len(sleep_data_list)}건 저장 시작")
 
-    # 1️⃣ DB 연결
-    conn = get_db_connection()
+    # # 1️⃣ DB 연결
+    # conn = get_db_connection()
 
-    if conn is None:
-    print("❌ DB 연결 실패로 저장 중단")
-    return
+    # if conn is None:
+    #     print("❌ DB 연결 실패로 저장 중단")
+    #     return
 
-    try:
-        with conn.cursor() as cur:
-            insert_sql = """
-            INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt)
-            VALUES (%s, %s, %s, %s)
-            """
+    # try:
+    #     with conn.cursor() as cur:
+    #         insert_sql = """
+    #         INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt)
+    #         VALUES (%s, %s, %s, %s)
+    #         """
 
-            rows = []
+    #         rows = []
 
-            for data in sleep_data_list:
-                rows.append((
-                    login_id,
-                    data['pose'],
-                    datetime.fromisoformat(data['start']),
-                    datetime.fromisoformat(data['end'])
-                ))
+    #         for data in sleep_data_list:
+    #             rows.append((
+    #                 login_id,
+    #                 data['pose'],
+    #                 datetime.fromisoformat(data['start']),
+    #                 datetime.fromisoformat(data['end'])
+    #             ))
 
-            # 2️⃣ 한 번에 INSERT
-            cur.executemany(insert_sql, rows)
-            conn.commit()
+    #         # 2️⃣ 한 번에 INSERT
+    #         cur.executemany(insert_sql, rows)
+    #         conn.commit()
 
-            print(f"✅ DB 저장 완료 ({len(rows)}건)")
+    #         print(f"✅ DB 저장 완료 ({len(rows)}건)")
 
-    except Exception as e:
-        conn.rollback()
-        print("❌ DB 저장 실패:", e)
+    # except Exception as e:
+    #     conn.rollback()
+    #     print("❌ DB 저장 실패:", e)
 
-    finally:
-        conn.close()
+    # finally:
+    #     conn.close()
 
 
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
@@ -258,7 +254,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
     sleep_timeline = []  # 최종 DB로 보낼 리스트
     
     current_pose = INF
-    start_time = datetime.datetime.now()
+    start_time = datetime.now()
     
     pending_pose = None  # 새로 바뀐 것처럼 보이는 자세
     pending_start_time = None
@@ -296,7 +292,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
             if frame_count % FRAME_SKIP != 0:
                 continue
 
-            now = datetime.datetime.now()
+            now = datetime.now()
 
             # ===== YOLO 추론 =====
             results = yolo_model(frame, imgsz=640, device=0, half=True, verbose=False, conf=CONF_THRES, iou=IOU_THRES)
@@ -351,7 +347,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
             sleep_timeline.append({
                 'pose': current_pose,
                 'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'end': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'end': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             })
         if stop_flag() and not DEBUG_MODE:
             process.terminate()
