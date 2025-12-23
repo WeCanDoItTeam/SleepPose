@@ -2,7 +2,7 @@
 import mariadb
 import streamlit as st
 import pandas as pd
-import connect_pool as dbPool
+from . import connect_pool as dbPool
 
 def get_db_connection():
     """데이터베이스 연결 객체를 반환합니다. (매번 새로 연결하여 안정성 확보)"""

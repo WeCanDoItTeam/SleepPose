@@ -18,8 +18,14 @@ class DBPool:
 
     # @staticmethod
     def create_pool():
-        db_info = st.secrets["mariadb"]
-        
+        db_info = {
+            "host": "192.168.0.76",
+            "port": 3306,
+            "user": "sleepPose",
+            "password": "251107",
+            "database": "sleep_monitor"
+        }
+
         try:
             dbpool = PooledDB(
             creator=mariadb.connect,  # mariadb 커넥터

@@ -7,6 +7,7 @@ import torch
 from torchvision import transforms
 import torch.nn as nn
 import timm
+from FrontEnd.db_utils import get_db_connection
 
 # 디버그 모드 (비디오 재생)
 DEBUG_MODE = True
@@ -198,48 +199,48 @@ def save_to_mariadb(login_id, sleep_data_list):
 
     print(f"\n💾 [DB 저장] 유저 {login_id} 수면 기록 {len(sleep_data_list)}건 저장 시작")
 
-    # # 1️⃣ DB 연결
-    # conn = get_db_connection()
+    # 1️⃣ DB 연결
+    conn = get_db_connection()
 
-    # if conn is None:
-    #     print("❌ DB 연결 실패로 저장 중단")
-    #     return
+    if conn is None:
+        print("❌ DB 연결 실패로 저장 중단")
+        return
 
-    # try:
-    #     with conn.cursor() as cur:
-    #         insert_sql = """
-    #         INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt)
-    #         VALUES (%s, %s, %s, %s)
-    #         """
+    try:
+        with conn.cursor() as cur:
+            insert_sql = """
+            INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt, dt)
+            VALUES (%s, %s, %s, %s, %s)
+            """
 
-    #         rows = []
+            rows = []
+            for data in sleep_data_list:
+                rows.append((
+                    login_id,
+                    data['pose'],
+                    datetime.fromisoformat(data['start']),
+                    datetime.fromisoformat(data['end']),
+                    datetime.now()
+                ))
 
-    #         for data in sleep_data_list:
-    #             rows.append((
-    #                 login_id,
-    #                 data['pose'],
-    #                 datetime.fromisoformat(data['start']),
-    #                 datetime.fromisoformat(data['end'])
-    #             ))
+            # 2️⃣ 한 번에 INSERT
+            cur.executemany(insert_sql, rows)
+            conn.commit()
 
-    #         # 2️⃣ 한 번에 INSERT
-    #         cur.executemany(insert_sql, rows)
-    #         conn.commit()
+            print(f"✅ DB 저장 완료 ({len(rows)}건)")
 
-    #         print(f"✅ DB 저장 완료 ({len(rows)}건)")
+    except Exception as e:
+        conn.rollback()
+        print("❌ DB 저장 실패:", e)
 
-    # except Exception as e:
-    #     conn.rollback()
-    #     print("❌ DB 저장 실패:", e)
-
-    # finally:
-    #     conn.close()
+    finally:
+        conn.close()
 
 
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
     if DEBUG_MODE:
-        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4")
+        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\laying.mp4")
     else:
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
@@ -355,7 +356,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
         
         # 차곡차곡 쌓인 데이터를 DB로 전송
         if sleep_timeline:
-            save_to_mariadb(user_id, sleep_timeline)
+            save_to_mariadb(login_id, sleep_timeline)
         
         print("🛑 분석 프로세스 종료")
 
