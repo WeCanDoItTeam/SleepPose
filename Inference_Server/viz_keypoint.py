@@ -112,17 +112,18 @@ def draw_face_conf(frame, kpts_xy, kpts_conf):
             cv2.LINE_AA
         )
 
+# 적외선 환경 더 잘 보이게 처리
 def ir_preprocess(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(2.0, (8,8))
     gray = clahe.apply(gray)
     return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-
+# 스무스하게 키포인트 이동
 def ema(prev, curr, alpha):
     return curr if prev is None else alpha * prev + (1 - alpha) * curr
 
-
+# 급격한 좌우 뒤집힘 방지
 def enforce_lr_consistency(kpts):
     """좌/우 스왑 방지"""
     pairs = [(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)]

@@ -16,10 +16,11 @@ DEBUG_MODE = True
 WIDTH, HEIGHT = 640, 640
 FRAME_SKIP = 5  # 15fps 중 3fps만 처리하기 위해 5프레임당 1회 추론
 FRAME_SIZE = WIDTH * HEIGHT * 3
-OFFSET = 9      # 약 3초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정
+OFFSET = 18      # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정
 INF = -123456789
-CONF_THRES = 0.5
+CONF_THRES = 0.7
 IOU_THRES = 0.5
+KPT_ALPHA = 0.85
 
 
 # 추론용: 크롭된 이미지 + (바운딩 박스 + 키포인트)
@@ -43,61 +44,72 @@ def predict_with_distinction(model, img, kpts, device):
         probs = torch.softmax(logits, dim=1)[0]
         pred = int(torch.argmax(probs))
     
-    # if probs[pred] < CONF_THRES:
-    #     pred = rule_based_postprocess(kpts)
+    if probs[pred] < CONF_THRES:
+        pred = rule_based_postprocess(kpts)
         
     return pred # 신뢰도가 높으면 그대로 반환
 
 # 룰 기반 결과 보정
-def rule_based_postprocess(kpts_tensor):
+def rule_based_postprocess(kpts, conf_thres=0.4, shoulder_parallel_deg=20):
+    if isinstance(kpts, torch.Tensor):
+        kpts = kpts.detach().cpu()
 
-    kpts = kpts_tensor.detach().cpu().numpy().flatten()
+    # batch 차원 제거
+    if kpts.ndim == 2:
+        kpts = kpts[0]
 
-    if kpts.size != 55:
+    if kpts.numel() != 55:
+        print(f"[DEBUG] invalid kpts numel = {kpts.numel()}")
         return 4
-     
-    # kpts 55개
-    kpts = kpts[4:]
-    kpts = kpts.reshape(17,3)
 
+    kpts = kpts.numpy()
+
+    # bbox 제거
+    kpts = kpts[4:].reshape(17, 3)
+
+    # 주요 키포인트
     nose = kpts[0]
+    l_eye, r_eye = kpts[1], kpts[2]
     l_shoulder, r_shoulder = kpts[5], kpts[6]
     l_wrist, r_wrist = kpts[9], kpts[10]
-    l_hip, r_hip = kpts[11], kpts[12]
 
-    shoulder_width = abs(l_shoulder[0] - r_shoulder[0])
-    torso_vec = np.array([(l_hip[0]+r_hip[0])/2 - (l_shoulder[0]+r_shoulder[0])/2,
-                          (l_hip[1]+r_hip[1])/2 - (l_shoulder[1]+r_shoulder[1])/2])
-    torso_len = np.linalg.norm(torso_vec)
-    torso_angle = np.arctan2(torso_vec[1], torso_vec[0]) * 180 / np.pi
+    # =========================
+    # STEP 1. 앞/뒤 판별
+    # =========================
+    face_conf_cnt = sum([
+        nose[2] > conf_thres,
+        l_eye[2] > conf_thres,
+        r_eye[2] > conf_thres
+    ])
 
-    # -----------------------------
-    # 1) Lying 먼저 체크 (바로 누움)
-    # torso 거의 수평, shoulder 넓음, 손목이 얼굴 위가 아닌 경우
-    if abs(torso_angle) < 20 and shoulder_width > torso_len * 0.5 and \
-       not ((l_wrist[2] > CONF_THRES and l_wrist[1] < l_shoulder[1]) or \
-            (r_wrist[2] > CONF_THRES and r_wrist[1] < r_shoulder[1])):
-        return 0  # lying
+    is_front = face_conf_cnt >= 2
 
-    # -----------------------------
-    # 2) Hand-up
-    if (l_wrist[2] > CONF_THRES and l_wrist[1] < l_shoulder[1]) or \
-       (r_wrist[2] > CONF_THRES and r_wrist[1] < r_shoulder[1]):
-        return 2  # handup
+    # =========================
+    # STEP 2. 앞을 보고 있는 경우
+    # =========================
+    if is_front:
+        # 어깨선 기울기
+        dx = r_shoulder[0] - l_shoulder[0]
+        dy = r_shoulder[1] - l_shoulder[1]
+        shoulder_angle = np.degrees(np.arctan2(dy, dx))
 
-    # -----------------------------
-    # 3) Back (엎드림)
-    if nose[2] < CONF_THRES and (l_shoulder[2] > CONF_THRES or r_shoulder[2] > CONF_THRES):
-        return 3  # back
+        is_parallel = abs(shoulder_angle) < shoulder_parallel_deg
 
-    # -----------------------------
-    # 4) Side
-    if 45 < abs(torso_angle) < 135 and shoulder_width < torso_len * 0.7:
-        return 1  # side
+        # 손목 위치
+        wrist_up = (
+            (l_wrist[2] > conf_thres and l_wrist[1] < l_shoulder[1]) or
+            (r_wrist[2] > conf_thres and r_wrist[1] < r_shoulder[1])
+        )
 
-    # -----------------------------
-    # 5) 기타
-    return 4
+        if is_parallel:
+            return 2 if wrist_up else 0
+        else:
+            return 1  # 옆으로 누움
+
+    # =========================
+    # STEP 3. 얼굴 안 보임 → 엎드림
+    # =========================
+    return 3
 
 # 이미지 크롭
 def crop_image(img, bbox):
@@ -125,6 +137,29 @@ def crop_image(img, bbox):
 
     return transform(crop_rgb)
 
+# 적외선 환경 더 잘 보이게 처리
+def ir_preprocess(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(2.0, (8,8))
+    gray = clahe.apply(gray)
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+# 스무스하게 키포인트 이동
+def ema(prev, curr, alpha):
+    return curr if prev is None else alpha * prev + (1 - alpha) * curr
+
+# 급격한 좌우 뒤집힘 방지
+def enforce_lr_consistency(kpts):
+    """좌/우 스왑 방지"""
+    pairs = [(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)]
+    if torch.isnan(kpts[5]).any() or torch.isnan(kpts[6]).any():
+        return kpts
+
+    if kpts[5,0] > kpts[6,0]:
+        for a,b in pairs:
+            kpts[[a,b]] = kpts[[b,a]]
+    return kpts
+
 # CNN
 class ImageEncoder(nn.Module):
     def __init__(self):
@@ -136,6 +171,11 @@ class ImageEncoder(nn.Module):
         # 가중치 동결
         for param in self.model.parameters():
             param.requires_grad = False
+
+        # top 레이어만 학습
+        for name, param in self.model.named_parameters():
+            if "blocks.4" in name or "blocks.5" in name:
+                param.requires_grad = True
 
     def forward(self, x):
         x = self.model.forward_features(x) # (Batch, 1280, 7, 7) 형태
@@ -151,9 +191,11 @@ class KeypointEncoder(nn.Module):
             nn.BatchNorm1d(128), # 학습 안정성을 위해 추가 권장
             nn.ReLU(),
             nn.Linear(128, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
             nn.ReLU()
         )
-        self.out_dim = 256
+        self.out_dim = 512
 
     def forward(self, kpts):
         return self.net(kpts.flatten(1))
@@ -179,7 +221,7 @@ class SleepPoseNet(nn.Module):
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-hybrid_weights = r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_4_22e_rl1e-4_best\sleep_pose_best_model.pt"
+hybrid_weights = r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_9_22e_rl1e-4_best\sleep_pose_best_model.pt"
 
 # ===== 추론 모델 로드 =====
 hybrid_model = SleepPoseNet(num_classes=5).to(device)
@@ -188,6 +230,8 @@ hybrid_model.eval()
 
 # ===== YOLO 모델 로드 =====
 yolo_model = YOLO("yolo11n-pose.pt")
+
+
 
 import pymysql
 from datetime import datetime
@@ -198,6 +242,17 @@ def save_to_mariadb(login_id, sleep_data_list):
         return
 
     print(f"\n💾 [DB 저장] 유저 {login_id} 수면 기록 {len(sleep_data_list)}건 저장 시작")
+
+    print("\n📋 [저장 예정 데이터 미리보기]")
+    for i, data in enumerate(sleep_data_list, 1):
+        print(
+            f"{i:02d}. "
+            f"user_id={login_id}, "
+            f"pose={data['pose']}, "
+            f"start={data['start']}, "
+            f"end={data['end']}"
+        )
+
 
     # 1️⃣ DB 연결
     conn = get_db_connection()
@@ -236,11 +291,10 @@ def save_to_mariadb(login_id, sleep_data_list):
     finally:
         conn.close()
 
-
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
     if DEBUG_MODE:
-        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\laying.mp4")
+        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4")
     else:
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
@@ -260,7 +314,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
     pending_pose = None  # 새로 바뀐 것처럼 보이는 자세
     pending_start_time = None
     consistent_count = 0  # 해당 자세가 몇 번 지속되었는지 카운트
-
+    prev_kpts_norm = None
     frame_count = 0
     print("✅ FFmpeg YOLO 스트림 및 타임라인 분석 시작")
 
@@ -288,6 +342,8 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                 if len(raw_frame) != FRAME_SIZE: break
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
+            frame = ir_preprocess(frame) # 적외선 환경 처리
+
             frame_count += 1
             # 15fps 중 3fps 추론 (5프레임마다 1번)
             if frame_count % FRAME_SKIP != 0:
@@ -306,7 +362,11 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                 x1, y1, x2, y2 = bbox_xyxy.int().tolist()
                 bbox_pixel = (x1, y1, x2, y2)
                 bbox_norm = result.boxes.xyxyn[0]
+
                 kpts_norm = result.keypoints.xyn[0]
+                kpts_norm = enforce_lr_consistency(kpts_norm) # 급격한 뒤집힘 방지
+                kpts_norm = ema(prev_kpts_norm, kpts_norm, KPT_ALPHA) # 키포인트 스무스 이동
+                prev_kpts_norm = kpts_norm.clone()
                 kpts_conf = result.keypoints.conf[0].unsqueeze(1)
                 kpts_n = torch.cat([kpts_norm, kpts_conf], dim=1)
 
