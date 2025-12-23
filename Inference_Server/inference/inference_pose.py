@@ -7,11 +7,11 @@ import torch
 from torchvision import transforms
 import torch.nn as nn
 import timm
-
+from inference_main import get_db_connection
+from util_infer import *
 
 # 디버그 모드 (비디오 재생)
 DEBUG_MODE = True
-
 
 # 설정값
 WIDTH, HEIGHT = 640, 640
@@ -192,17 +192,55 @@ hybrid_model.eval()
 # ===== YOLO 모델 로드 =====
 yolo_model = YOLO("yolo11n-pose.pt")
 
-def save_to_mariadb(user_id, sleep_data_list):
-    """
-    마리아디비 저장 메서드 (내용은 나중에 채움)
-    sleep_data_list: [{'pose': '자세명', 'start': '시간', 'end': '시간'}, ...]
-    """
-    print(f"\n💾 [DB 저장] 유저 {user_id}의 수면 기록 {len(sleep_data_list)}건 저장 시도 중...")
-    # SQL 연결 및 INSERT 로직이 들어갈 자리
-    for data in sleep_data_list:
-        print(f" > {data['pose']}: {data['start']} ~ {data['end']}")
+import pymysql
+from datetime import datetime
 
-def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_id: int):
+def save_to_mariadb(login_id, sleep_data_list):
+    if not sleep_data_list:
+        print("⚠️ 저장할 데이터가 없습니다.")
+        return
+
+    print(f"\n💾 [DB 저장] 유저 {login_id} 수면 기록 {len(sleep_data_list)}건 저장 시작")
+
+    # 1️⃣ DB 연결
+    conn = get_db_connection()
+
+    if conn is None:
+    print("❌ DB 연결 실패로 저장 중단")
+    return
+
+    try:
+        with conn.cursor() as cur:
+            insert_sql = """
+            INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt)
+            VALUES (%s, %s, %s, %s)
+            """
+
+            rows = []
+
+            for data in sleep_data_list:
+                rows.append((
+                    login_id,
+                    data['pose'],
+                    datetime.fromisoformat(data['start']),
+                    datetime.fromisoformat(data['end'])
+                ))
+
+            # 2️⃣ 한 번에 INSERT
+            cur.executemany(insert_sql, rows)
+            conn.commit()
+
+            print(f"✅ DB 저장 완료 ({len(rows)}건)")
+
+    except Exception as e:
+        conn.rollback()
+        print("❌ DB 저장 실패:", e)
+
+    finally:
+        conn.close()
+
+
+def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
     if DEBUG_MODE:
         cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4")
@@ -307,7 +345,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, user_i
                 pending_pose = None
 
     finally:
-        
+
         # 반복문 종료 시 마지막 자세 저장
         if current_pose != INF:
             sleep_timeline.append({

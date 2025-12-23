@@ -18,69 +18,83 @@ AUDIO_LABELS = {0: "일반/기타", 1: "코골이", 2: "이갈이"}
 
 
 # # --- 콜백 함수 정의 (버튼 클릭 시 즉시 실행) ---
-# def start_monitoring_callback(new_uid, new_upw, new_ip):
-#     """시작 버튼 클릭 시 실행되는 콜백"""
-#     payload = {
-#         "user_id": new_uid,
-#         "password": new_upw,
-#         "ip": new_ip
-#     }
-#     try:
-#         response = requests.post(BE_START_URL, json=payload)
-#         if response.status_code == 200 and response.json().get("result") is True:
-        
-#         st.session_state.is_analyzing = True
-#         st.session_state.start_time = time.time()
-#         st.toast("모니터링을 시작합니다.")
-#     except Exception as e:
-#         st.error(f"백엔드 연결 실패: {e}")
+def start_monitoring_callback(new_uid, new_upw, new_ip):
+    """시작 버튼 클릭 시 실행되는 콜백"""
+    payload = {
+        "login_id": st.session_state.user_id,
+        "user_id": new_uid,
+        "password": new_upw,
+        "ip": new_ip
+    }
+
+    try:
+        response = requests.post(BE_START_URL, json=payload)
+
+        if response.status_code == 200 and response.json().get("result") is True:
+            st.toast("모니터링을 시작합니다.")
+
+            st.session_state.is_analyzing = True
+            st.session_state.start_time = time.time()
+        elif response.status_code == 400:
+            st.toast("이미 모니터링 중입니다!")
+    except Exception as e:
+        st.error(f"백엔드 연결 실패: {e}")
 
 # loadbox simulation callback
-def start_monitoring_callback(new_uid, new_upw, new_ip):
-    user_id = st.session_state.get("user_id")
+# def start_monitoring_callback(new_uid, new_upw, new_ip):
+#     user_id = st.session_state.get("user_id")
     
-    # LoadBox 인스턴스 세션 관리
-    if 'loadbox' not in st.session_state:
-        st.session_state.loadbox = LoadBox(user_id)
+#     # LoadBox 인스턴스 세션 관리
+#     if 'loadbox' not in st.session_state:
+#         st.session_state.loadbox = LoadBox(user_id)
     
-    # 스레드 실행 (이미 실행 중이지 않을 때만)
-    if 'loadbox_thread' not in st.session_state or not st.session_state.loadbox_thread.is_alive():
-        st.session_state.loadbox_thread = threading.Thread(
-            target=st.session_state.loadbox.start_simulation, 
-            daemon=True
-        )
-        st.session_state.loadbox_thread.start()
+#     # 스레드 실행 (이미 실행 중이지 않을 때만)
+#     if 'loadbox_thread' not in st.session_state or not st.session_state.loadbox_thread.is_alive():
+#         st.session_state.loadbox_thread = threading.Thread(
+#             target=st.session_state.loadbox.start_simulation, 
+#             daemon=True
+#         )
+#         st.session_state.loadbox_thread.start()
 
-    st.session_state.is_analyzing = True
-    st.session_state.start_time = time.time() # 경과 시간(float) 계산용
-    st.session_state.start_time_dt = datetime.now() # 리포트(datetime) 조회를 위해 추가
-    st.toast("모니터링 시작: 가상 데이터를 30초마다 생성합니다.", icon="✅")
-
-# def stop_monitoring_callback():
-#     """종료 버튼 클릭 시 실행되는 콜백"""
-#     try:
-#         # FastAPI 종료 엔드포인트 호출
-#         response = requests.post(BE_END_URL)
-#         st.session_state.last_report_data = response.json()
-        
-#         st.session_state.is_analyzing = False
-#         st.session_state.start_time = None
-#         st.session_state.page= "report" # 리포트 페이지로 이동 설정
-#         st.toast("모니터링이 종료되었습니다.")
-     
-#     except Exception as e:
-#         st.error(f"종료 요청 실패: {e}")
+#     st.session_state.is_analyzing = True
+#     st.session_state.start_time = time.time() # 경과 시간(float) 계산용
+#     st.session_state.start_time_dt = datetime.now() # 리포트(datetime) 조회를 위해 추가
+#     st.toast("모니터링 시작: 가상 데이터를 30초마다 생성합니다.", icon="✅")
 
 def stop_monitoring_callback():
-    # LoadBox 중단
-    if 'loadbox' in st.session_state:
-        st.session_state.loadbox.stop_simulation()
+    """종료 버튼 클릭 시 실행되는 콜백"""
+    try:
+        # FastAPI 종료 엔드포인트 호출
+        # LoadBox 중단 (현재는 LoadBox 표시 안함)
+        # if 'loadbox' in st.session_state:
+        #     st.session_state.loadbox.stop_simulation()
+        
+        # 리포트 조회를 위해 종료 시간 기록 (TypeError 방지를 위해 _dt 통일 권장)
+        response = requests.post(BE_END_URL)
+        if response.status_code == 200 and response.json().get("result") is True:
+            st.toast("모니터링이 종료되었습니다.")
+            
+            st.session_state.last_report_data = response.json()
+            
+            st.session_state.end_time_dt = datetime.now() 
+            st.session_state.is_analyzing = False
+            st.session_state.page = "report" # 리포트 페이지로 이동
+        elif response.status_code == 500:
+            st.toast("종료할 모니터링 스트림이 없습니다!")
+     
+    except Exception as e:
+        st.error(f"종료 요청 실패: {e}")
+
+# def stop_monitoring_callback():
+#     # LoadBox 중단
+#     if 'loadbox' in st.session_state:
+#         st.session_state.loadbox.stop_simulation()
     
-    # 리포트 조회를 위해 종료 시간 기록 (TypeError 방지를 위해 _dt 통일 권장)
-    st.session_state.end_time_dt = datetime.now() 
-    st.session_state.is_analyzing = False
-    st.session_state.page = "report" # 리포트 페이지로 이동
-    st.toast("모니터링이 종료되었습니다.", icon="🛑")
+#     # 리포트 조회를 위해 종료 시간 기록 (TypeError 방지를 위해 _dt 통일 권장)
+#     st.session_state.end_time_dt = datetime.now() 
+#     st.session_state.is_analyzing = False
+#     st.session_state.page = "report" # 리포트 페이지로 이동
+#     st.toast("모니터링이 종료되었습니다.", icon="🛑")
 
 @st.fragment(run_every=5.0)
 def data_visualization_fragment(user_id):

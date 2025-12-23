@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from datetime import datetime
 import threading
 from inference.inference_pose import run_ffmpeg_yolo
+from FrontEnd.db_utils import *
 
 app = FastAPI()
 
@@ -17,14 +18,14 @@ class GlobalState:
 
 state = GlobalState()
 
-def inference_loop(rtsp_url: str, user_id: str):
+def inference_loop(rtsp_url: str, login_id: str):
     # 전역 상태를 참조하여 루프 실행
     # try:
     run_ffmpeg_yolo(
         rtsp_url=rtsp_url,
         ffmpeg_path=FFMPEG_PATH,
         stop_flag=lambda: not state.inference_running,
-        user_id= user_id
+        login_id= login_id
     )
 
         # 여기서 오디오 추론 메서드 실행
@@ -34,6 +35,7 @@ def inference_loop(rtsp_url: str, user_id: str):
     #     print("Inference loop terminated.")
 
 class UserData(BaseModel):
+    login_id: str
     user_id: str
     password: str
     ip: str
@@ -50,7 +52,7 @@ async def start_inference(userData: UserData):
 
     state.inference_thread = threading.Thread(
         target=inference_loop,
-        args=(rtsp_url,userData.user_id),
+        args=(rtsp_url,userData.login_id),
         daemon=True
     )
     state.inference_thread.start()

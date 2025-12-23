@@ -385,15 +385,25 @@ def predict_with_distinction(model, img, kpts, device, conf_thres=0.3):
         probs = torch.softmax(logits, dim=1)[0]
         pred = int(torch.argmax(probs))
     
-    # if probs[pred] < conf_thres:
-    pred = rule_based_postprocess(kpts)
+    if probs[pred] < conf_thres:
+        pred = rule_based_postprocess(kpts)
         
     return pred # 신뢰도가 높으면 그대로 반환
 
 # 룰 기반 결과 보정
 def rule_based_postprocess(kpts, conf_thres=0.3, shoulder_parallel_deg=15):
-    if kpts.size != 55:
+    if isinstance(kpts, torch.Tensor):
+        kpts = kpts.detach().cpu()
+
+    # batch 차원 제거
+    if kpts.ndim == 2:
+        kpts = kpts[0]
+
+    if kpts.numel() != 55:
+        print(f"[DEBUG] invalid kpts numel = {kpts.numel()}")
         return 4
+
+    kpts = kpts.numpy()
 
     # bbox 제거
     kpts = kpts[4:].reshape(17, 3)
