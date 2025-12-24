@@ -10,13 +10,13 @@ import timm
 from Inference_Server.inference.db_utils import get_db_connection
 
 # 디버그 모드 (True : 비디오 재생 / False : RTSP)
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 # 설정값
 WIDTH, HEIGHT = 640, 640
 FRAME_SKIP = 5  # 총 15fps 중 3fps만 처리하기 위해 5프레임당 1회 추론
 FRAME_SIZE = WIDTH * HEIGHT * 3
-OFFSET = 18  # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정
+OFFSET = 9  # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정 (메서드에서 조건부 변경)
 INF = -123456789 # Pose_id 초기값
 CONF_THRES = 0.7 # 키포인트 신뢰도 기준
 IOU_THRES = 0.5 # yolo용 iou 기준
@@ -278,7 +278,7 @@ def save_to_mariadb(login_id, sleep_data_list):
     try:
         with conn.cursor() as cur:
             insert_sql = """
-            INSERT INTO sleep_pose2 (user_id, pose_class, st_dt, ed_dt, dt)
+            INSERT INTO sleep_pose (user_id, pose_class, st_dt, ed_dt, dt)
             VALUES (%s, %s, %s, %s, %s)
             """
 
@@ -310,8 +310,10 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
 
     # DEBUG_MODE일 시 비디오 추론
     if DEBUG_MODE:
+        OFFSET = 18 # 6초 오프셋
         cap = cv2.VideoCapture(r".\data\lee_video\infer_Lee.mp4")
     else:
+        OFFSET = 9 # 3초 오프셋
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
             "-flags", "low_delay", "-i", rtsp_url,
