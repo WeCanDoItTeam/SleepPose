@@ -305,7 +305,7 @@ def save_to_mariadb(login_id, sleep_data_list):
     finally:
         conn.close()
 
-# RTSP 실행 및 
+# [메인 함수] RTSP 실행 및 추론, 데이터 가공 저장
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
     # DEBUG_MODE일 시 비디오 추론
