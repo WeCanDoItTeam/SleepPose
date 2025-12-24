@@ -119,7 +119,7 @@ def get_sleep_day(user_id,st_dt,ed_dt):
         if conn:
             conn.close()            
 
-def get_sleep_month(user_id,st_dt,ed_dt):
+def get_sleep_month(user_id,st_dt,ed_dt,gubun='%H'):
     """
     monitor.py에서 차트를 그리기 위해 사용.
     최신 데이터를 판다스 데이터프레임으로 반환합니다.
@@ -127,13 +127,12 @@ def get_sleep_month(user_id,st_dt,ed_dt):
     conn = get_db_connection()
     if not conn:
         return None
-    
     try:
         cursor = conn.cursor(dictionary=True)
         # 1. 자세 데이터 가져오기
         pose_query = """
             SELECT pose_class,c.code_nm as pose_nm,
-                DATE_FORMAT(st_dt, '%H') AS hour_slot,
+                DATE_FORMAT(st_dt, %s) AS hour_slot,
                 SUM(TIMESTAMPDIFF(SECOND, st_dt, ed_dt))/60 AS minutes
             FROM sleep_pose t
             left outer join comm_code c on t.pose_class = c.code_id and c.code_cd='pose'
@@ -143,7 +142,7 @@ def get_sleep_month(user_id,st_dt,ed_dt):
         """
         st_dt = st_dt + " 13:00:00"
         ed_dt = ed_dt + " 13:00:00"
-        cursor.execute(pose_query, (st_dt, ed_dt,user_id))
+        cursor.execute(pose_query, (gubun,st_dt, ed_dt,user_id))
         data = cursor.fetchall()
         return data
     except Exception as e:

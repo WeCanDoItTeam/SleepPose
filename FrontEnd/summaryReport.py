@@ -134,10 +134,11 @@ def pieChart(user_id,  st_dt):
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, textinfo='label+percent',
                                 insidetextorientation='radial'
                                 )])
+    fig.update_traces(showlegend=False)  
     st.plotly_chart(fig, use_container_width=True)  
-def barChart(user_id,  st_dt):
+def barChart_Day(user_id,  st_dt):
     (start_date, end_date) = startEndDate(st_dt)
-    pose_data = get_sleep_month(user_id, str(start_date), str(end_date))
+    pose_data = get_sleep_month(user_id, str(start_date), str(end_date), gubun='%d')
     pose_df = pd.DataFrame(pose_data)
 
     if pose_df.empty:
@@ -170,13 +171,67 @@ def barChart(user_id,  st_dt):
              }
     )
     fig.update_layout(
-        xaxis_title='시간대(시)',      # 12, 13, 14 ...
-        yaxis_title='포즈 클래스'    # 0,1,2,3,4
-        # coloraxis_colorbar_title='시간합(분)'  # 색바 라벨
+        xaxis_title='일별',      # 12, 13, 14 ...
+        yaxis_title='포즈 클래스' ,   # 0,1,2,3,4
+        legend=dict(
+            y=-0.2,
+            x=0.5,
+            xanchor="center",
+            yanchor="top",
+            orientation="h",  # 이 줄 추가: 수평 범례
+        ),
+        margin=dict(b=200)
     )
-    # wide_df = px.data.medals_wide()
-    # fig = px.bar(pose_df, x=values, y=labels, title="Wide-Form Input")
-    st.plotly_chart(fig, use_container_width=True)  
+    st.plotly_chart(fig, width='stretch')
+
+
+def barChart_Hour(user_id, st_dt):
+    (start_date, end_date) = startEndDate(st_dt)
+    pose_data = get_sleep_month(user_id, str(start_date), str(end_date))
+    pose_df = pd.DataFrame(pose_data)
+
+    if pose_df.empty:
+        st.markdown("## 데이터가 없습니다")
+        return
+
+    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)  # 시간대별
+    pose_df['pose_class'] = pose_df['pose_class'].astype(str)
+    pose_df['minutes'] = pose_df['minutes'].astype(float)  # 소요시간(분)
+    pose_df['pose_nm'] = pose_df['pose_nm'].astype(str)
+
+    labels = pose_df['pose_nm'].tolist()
+    values = pose_df['minutes'].tolist()
+
+    long_df = px.data.medals_long()
+    fig = px.bar(pose_df,
+                 x="hour_slot",
+                 y="minutes",
+                 color="pose_nm",
+                 barmode='stack',  # 병렬 막대
+                 title="시간대별 포즈 소요시간(분)",
+                 text="minutes",
+                 color_discrete_map={
+                     '바로 누운 자세': '#1f77b4',
+                     '옆으로 누워자기': '#ff7f0e',
+                     '팔든 자세': '#2ca02c',
+                     '엎드린 자세': "#9432d6",
+                     '기타': "#b0cf3f"
+                 }
+                 )
+    fig.update_layout(
+        xaxis_title='시간대(시)',  # 12, 13, 14 ...
+        yaxis_title='포즈 클래스',  # 0,1,2,3,4
+        legend=dict(
+            y=-0.2,
+            x=0.5,
+            xanchor="center",
+            yanchor="top",
+            orientation="h",  # 이 줄 추가: 수평 범례
+        ),
+        margin=dict(b=200)
+    )
+    st.plotly_chart(fig, width='stretch')
+
 
 def report_window():
     user_id = st.session_state.user_id
@@ -186,12 +241,12 @@ def report_window():
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🕒일간 리포트", use_container_width=True):
+        if st.button("🕒일간 리포트", width='stretch'):
             st.session_state.page = 'summaryReport'
             st.session_state.reportFlag = 'D'
             st.rerun()
     with col2:
-        if st.button("📅 월간리포트", use_container_width=True):
+        if st.button("📅 월간리포트", width='stretch'):
             st.session_state.page = 'summaryReport'
             st.session_state.reportFlag = 'M'
             st.rerun()
@@ -207,7 +262,7 @@ def report_window():
         with col2:
             month = st.selectbox("월", months, index=date.today().month - 1)
         with col3:
-            pose_chart = ['1: 월간heatmap', '2: 월간pie', '3: 월간bar', '4: 연간_미정']
+            pose_chart = ['1: 월간heatmap', '2: 월간_자세별', '3: 월간_시간별', '4: 월간_일자별']
             selected_chart = st.selectbox("그래프 선택", pose_chart, index=0)
         selected_date = f"{year}{month:02d}"
     else:
@@ -224,13 +279,12 @@ def report_window():
         ganttchart(user_id, selected_date)
     elif( selected_chart == "1: 월간heatmap"):
         heatmapChart(user_id, selected_date)
-    elif( selected_chart == '2: 월간pie'):
+    elif( selected_chart == '2: 월간_자세별'):
         pieChart(user_id, selected_date)
-    elif( selected_chart == '3: 월간bar'):
-        barChart(user_id, selected_date)
-    elif( selected_chart == '4: 연간_미정'):
-        exit()
-
+    elif( selected_chart == '3: 월간_시간별'):
+        barChart_Hour(user_id, selected_date)
+    elif (selected_chart == '4: 월간_일자별'):
+        barChart_Day(user_id, selected_date)
     st.markdown("---")
     if st.button("🏠 모니터링 화면으로", use_container_width=True):
         st.session_state.page = 'monitor'
