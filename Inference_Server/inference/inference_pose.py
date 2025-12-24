@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 import torch.nn as nn
 import timm
-from FrontEnd.db_utils import get_db_connection
+from Inference_Server.inference.db_utils import get_db_connection
 
 # 디버그 모드 (비디오 재생)
 DEBUG_MODE = True
