@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from loadbox import LoadBox   # LoadBox 클래스 임포트   
 
 # FastAPI 설정
-IP = "http://192.168.0.14:8000/"
+IP = "http://192.168.0.108:8000/"
 BE_START_URL = IP + "start"
 BE_END_URL = IP + "end"
 

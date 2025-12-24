@@ -96,6 +96,9 @@ def get_sleep_day(user_id,st_dt,ed_dt):
         return None
     
     try:
+        st_dt = st_dt + " 13:00:00"
+        ed_dt = ed_dt + " 13:00:00"
+
         cursor = conn.cursor(dictionary=True)
         # 1. 자세 데이터 가져오기
         pose_query = """
@@ -105,11 +108,20 @@ def get_sleep_day(user_id,st_dt,ed_dt):
             WHERE user_id = %s 
             AND st_dt BETWEEN %s AND %s
         """
-        st_dt = st_dt + " 13:00:00"
-        ed_dt = ed_dt + " 13:00:00"
         cursor.execute(pose_query, (user_id, st_dt, ed_dt))
         data = cursor.fetchall()
-        return data
+
+        audio_query = """
+                    SELECT st_dt, b.code_nm audio_class, ed_dt
+                    FROM sleep_audio p
+        		    left outer join comm_code b on b.code_cd='audio' and b.code_id=p.audio_class
+                    WHERE user_id = %s 
+                    AND st_dt BETWEEN %s AND %s
+                """
+
+        cursor.execute(audio_query, (user_id, st_dt, ed_dt))
+        audio_data = cursor.fetchall()
+        return (data,audio_data)
     except Exception as e:
         st.error(f"데이터 프레임 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -128,6 +140,9 @@ def get_sleep_month(user_id,st_dt,ed_dt,gubun='%H'):
     if not conn:
         return None
     try:
+        st_dt = st_dt + " 13:00:00"
+        ed_dt = ed_dt + " 13:00:00"
+
         cursor = conn.cursor(dictionary=True)
         # 1. 자세 데이터 가져오기
         pose_query = """
@@ -140,11 +155,22 @@ def get_sleep_month(user_id,st_dt,ed_dt,gubun='%H'):
             AND user_id = %s
             GROUP BY hour_slot, pose_class, code_nm
         """
-        st_dt = st_dt + " 13:00:00"
-        ed_dt = ed_dt + " 13:00:00"
         cursor.execute(pose_query, (gubun,st_dt, ed_dt,user_id))
-        data = cursor.fetchall()
-        return data
+        pose_data = cursor.fetchall()
+
+        audio_query = """
+                    SELECT audio_class,c.code_nm as audio_nm,
+                        DATE_FORMAT(st_dt, %s) AS hour_slot,
+                        SUM(TIMESTAMPDIFF(SECOND, st_dt, ed_dt))/60 AS minutes
+                    FROM sleep_audio t
+                    left outer join comm_code c on t.audio_class = c.code_id and c.code_cd='audio'
+                    WHERE st_dt BETWEEN %s AND %s
+                    AND user_id = %s
+                    GROUP BY hour_slot, audio_class, code_nm
+                """
+        cursor.execute(audio_query, (gubun, st_dt, ed_dt, user_id))
+        audio_data = cursor.fetchall()
+        return (pose_data,audio_data)
     except Exception as e:
         st.error(f"데이터 프레임 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
