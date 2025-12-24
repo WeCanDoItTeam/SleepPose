@@ -19,6 +19,30 @@ from tabulate import tabulate
 # Utils
 # =========================================================
 
+KPT_ALPHA = 0.85
+# 적외선 환경 더 잘 보이게 처리
+def ir_preprocess(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(2.0, (8,8))
+    gray = clahe.apply(gray)
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+# 스무스하게 키포인트 이동
+def ema(prev, curr, alpha):
+    return curr if prev is None else alpha * prev + (1 - alpha) * curr
+
+# 급격한 좌우 뒤집힘 방지
+def enforce_lr_consistency(kpts):
+    """좌/우 스왑 방지"""
+    pairs = [(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)]
+    if np.isnan(kpts[5]).any() or np.isnan(kpts[6]).any():
+        return kpts
+
+    if kpts[5,0] > kpts[6,0]:
+        for a,b in pairs:
+            kpts[[a,b]] = kpts[[b,a]]
+    return kpts
+
 # 기존 라벨을 (바운딩 박스(원본 이미지 픽셀) / 바운딩 박스(원본 이미지 정규화) + 키포인트(이미 정규화) / 클래스 아이디)로 분류
 def load_yolo_pose_label(label_path, img_w, img_h):
 
@@ -166,6 +190,11 @@ class ImageEncoder(nn.Module):
         for param in self.model.parameters():
             param.requires_grad = False
 
+        # top 레이어만 학습
+        for name, param in self.model.named_parameters():
+            if "blocks.4" in name or "blocks.5" in name:
+                param.requires_grad = True
+
     def forward(self, x):
         x = self.model.forward_features(x) # (Batch, 1280, 7, 7) 형태
         x = torch.mean(x, dim=(2, 3), keepdim=True)
@@ -180,9 +209,11 @@ class KeypointEncoder(nn.Module):
             nn.BatchNorm1d(128), # 학습 안정성을 위해 추가 권장
             nn.ReLU(),
             nn.Linear(128, 256),
+            nn.ReLU(),
+            nn.Linear(256, 512),
             nn.ReLU()
         )
-        self.out_dim = 256
+        self.out_dim = 512
 
     def forward(self, kpts):
         return self.net(kpts.flatten(1))
@@ -207,6 +238,21 @@ class SleepPoseNet(nn.Module):
         f_kpt = self.kpt_enc(kpts)
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
+from torch.nn import functional as F
+
+# 변경한 손실함수
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2, reduction='mean'):
+        super().__init__()
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        loss = ((1 - pt) ** self.gamma) * ce_loss
+        return loss.mean() if self.reduction=='mean' else loss.sum()
+
 # =========================================================
 # Training
 # =========================================================
@@ -229,15 +275,16 @@ def train():
 
     model = SleepPoseNet(num_classes=5).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-    class_weights = torch.tensor([
-        1.0,  # lying
-        1.0,  # side
-        1.0,  # handup
-        1.0,  # back
-        1.0  # other
-    ], device=device)
+    # class_weights = torch.tensor([
+    #     1.0,  # lying
+    #     1.0,  # side
+    #     1.0,  # handup
+    #     1.0,  # back
+    #     1.0  # other
+    # ], device=device)
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = FocalLoss()
+    # criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # 🔥 최적 모델 저장을 위한 변수 초기화
     best_val_loss = float('inf')  # 처음에는 아주 큰 값으로 설정
@@ -378,7 +425,7 @@ def build_hybrid_inputs(image_bgr, bbox, bbox_n, kpts, device):
 # ---------------------------------------------------------
 
 # 예측 결과 키포인트 처리
-def predict_with_distinction(model, img, kpts, device, conf_thres=0.3):
+def predict_with_distinction(model, img, kpts, device, conf_thres=0.7):
     model.eval()
     with torch.no_grad():
         logits = model(img.to(device), kpts.to(device))
@@ -391,7 +438,7 @@ def predict_with_distinction(model, img, kpts, device, conf_thres=0.3):
     return pred # 신뢰도가 높으면 그대로 반환
 
 # 룰 기반 결과 보정
-def rule_based_postprocess(kpts, conf_thres=0.3, shoulder_parallel_deg=15):
+def rule_based_postprocess(kpts, conf_thres=0.4, shoulder_parallel_deg=20):
     if isinstance(kpts, torch.Tensor):
         kpts = kpts.detach().cpu()
 
@@ -613,7 +660,7 @@ def predict_video(
     yolo_weights="yolo11n-pose.pt",
     hybrid_weights="sleep_pose_hybrid_hj.pt",
     output_path=None,
-    conf_thres=0.3,
+    conf_thres=0.7,
     stream=True
 ):
 
@@ -626,6 +673,8 @@ def predict_video(
     yolo_model = YOLO(yolo_weights)
 
     IMG_SIZE = 640
+
+    prev_kpts_norm = None
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -660,6 +709,7 @@ def predict_video(
             # print(frame)
             continue
 
+        frame = ir_preprocess(frame) # 적외선 환경 처리
         cls_id = None
         results = yolo_model(frame, conf=CONF_THRES, iou=IOU_THRES, verbose=False)
         result = results[0] # 무조건 첫 번째 박스만 검출
@@ -673,6 +723,9 @@ def predict_video(
             kpts = result.keypoints.xy[0].cpu().numpy() # 키포인트 (정규화 안 됨) cv 출력용
 
             kpts_norm = result.keypoints.xyn[0].cpu().numpy() # 키포인트 정규화
+            kpts_norm = enforce_lr_consistency(kpts_norm) # 급격한 뒤집힘 방지
+            kpts_norm = ema(prev_kpts_norm, kpts_norm, KPT_ALPHA) # 키포인트 스무스 이동
+            prev_kpts_norm = kpts_norm.copy()
             kpts_conf = result.keypoints.conf[0].cpu().numpy().reshape(17, 1) # 키포인트 신뢰도
             kpts_n = np.concatenate([kpts_norm, kpts_conf], axis=1).astype(np.float32)
 
@@ -902,9 +955,9 @@ if __name__ == '__main__':
 
     # predict video
     preds = predict_video(
-        video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Lee.mp4",
+        video_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4",
         yolo_weights="yolo11n-pose.pt",
-        hybrid_weights=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_4_22e_rl1e-4_best\{pt_name}",
+        hybrid_weights=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_9_22e_rl1e-4_best\{pt_name}",
         #output_path=rf"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\infer_video\{name}"
     )
     visualize_preds(preds, save_path="sleep_pose_timeline.jpg")

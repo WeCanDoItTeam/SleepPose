@@ -99,8 +99,9 @@ def get_sleep_day(user_id,st_dt,ed_dt):
         cursor = conn.cursor(dictionary=True)
         # 1. 자세 데이터 가져오기
         pose_query = """
-            SELECT st_dt, pose_class, ed_dt
-            FROM sleep_pose2
+            SELECT st_dt, b.code_nm pose_class, ed_dt
+            FROM sleep_pose p
+		    left outer join comm_code b on b.code_cd='pose' and b.code_id=p.pose_class
             WHERE user_id = %s 
             AND st_dt BETWEEN %s AND %s
         """
@@ -134,7 +135,7 @@ def get_sleep_month(user_id,st_dt,ed_dt):
             SELECT pose_class,c.code_nm as pose_nm,
                 DATE_FORMAT(st_dt, '%H') AS hour_slot,
                 SUM(TIMESTAMPDIFF(SECOND, st_dt, ed_dt))/60 AS minutes
-            FROM sleep_pose2 t
+            FROM sleep_pose t
             left outer join comm_code c on t.pose_class = c.code_id and c.code_cd='pose'
             WHERE st_dt BETWEEN %s AND %s
             AND user_id = %s
@@ -151,56 +152,5 @@ def get_sleep_month(user_id,st_dt,ed_dt):
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()             
-            
-def initialize_db():
-    """앱 시작 시 테이블 구조를 자동으로 생성/확인합니다."""
-    # 사용자의 코드와 동일하게 유지하되, dictionary=True 관련 이슈 방지를 위해 일반 cursor 사용
-    conn = get_db_connection()
-    if not conn: return
-    
-    try:
-        cursor = conn.cursor()
-        # users 테이블
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id VARCHAR(20) PRIMARY KEY,
-                user_passwd VARCHAR(20) NOT NULL,
-                RTSP_ip_address VARCHAR(15),
-                RTSP_user_id VARCHAR(32),
-                RTSP_user_passwd VARCHAR(32)
-            );
-        """)
-        # sleep_pose 테이블
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sleep_pose (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                dt DATE NOT NULL,
-                pose_class TINYINT NOT NULL,
-                st_dt TIMESTAMP NOT NULL,
-                ed_dt TIMESTAMP,
-                user_id VARCHAR(20),
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            );
-        """)
-        # sleep_audio 테이블
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sleep_audio (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                dt DATE NOT NULL,
-                audio_class TINYINT NOT NULL,
-                st_dt TIMESTAMP NOT NULL,
-                ed_dt TIMESTAMP,
-                user_id VARCHAR(20),
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            );
-        """)
-        conn.commit()
-        cursor.close()
-        
-    except mariadb.Error as e:
-        st.error(f"DB 초기화 실패: {e}")
-    finally:
         if conn:
             conn.close()
