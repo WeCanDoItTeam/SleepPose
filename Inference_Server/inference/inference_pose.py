@@ -9,27 +9,31 @@ import torch.nn as nn
 import timm
 from Inference_Server.inference.db_utils import get_db_connection
 
-# 디버그 모드 (비디오 재생)
+# 디버그 모드 (True : 비디오 재생 / False : RTSP)
 DEBUG_MODE = True
 
 # 설정값
 WIDTH, HEIGHT = 640, 640
-FRAME_SKIP = 5  # 15fps 중 3fps만 처리하기 위해 5프레임당 1회 추론
+FRAME_SKIP = 5  # 총 15fps 중 3fps만 처리하기 위해 5프레임당 1회 추론
 FRAME_SIZE = WIDTH * HEIGHT * 3
-OFFSET = 18      # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정
-INF = -123456789
-CONF_THRES = 0.7
-IOU_THRES = 0.5
-KPT_ALPHA = 0.85
+OFFSET = 18  # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정
+INF = -123456789 # Pose_id 초기값
+CONF_THRES = 0.7 # 키포인트 신뢰도 기준
+IOU_THRES = 0.5 # yolo용 iou 기준
+KPT_ALPHA = 0.85 # 키포인트 스무스 이동을 위한 조정값
 
+# =========================================================
+# Utils
+# =========================================================
 
 # 추론용: 크롭된 이미지 + (바운딩 박스 + 키포인트)
 def build_hybrid_inputs(image_bgr, bbox, bbox_n, kpts_tensor, device):
-    # Crop person region
+    # 바운딩박스 기준 이미지 크롭 (사람만 보이게)
     crop = crop_image(image_bgr, bbox)
     if crop is None : return None, None
     img_tensor = crop.unsqueeze(0).to(device)
 
+    # 바운딩 박스 + 키포인트(정규화 됨)
     kpts_flat = kpts_tensor.reshape(-1) # (51,)
     kpts_add = torch.cat([bbox_n, kpts_flat], dim=0) # 바운딩 박스 추가
     kpt_tensor = kpts_add.unsqueeze(0).float() # (1, 55)
@@ -44,6 +48,7 @@ def predict_with_distinction(model, img, kpts, device):
         probs = torch.softmax(logits, dim=1)[0]
         pred = int(torch.argmax(probs))
     
+    # 일정 미만 신뢰도일 시 룰 기반 결과 보정 처리
     if probs[pred] < CONF_THRES:
         pred = rule_based_postprocess(kpts)
         
@@ -154,13 +159,19 @@ def enforce_lr_consistency(kpts):
     pairs = [(5,6),(7,8),(9,10),(11,12),(13,14),(15,16)]
     if torch.isnan(kpts[5]).any() or torch.isnan(kpts[6]).any():
         return kpts
-
+    # 양 어깨가 위치 뒤바뀌면 아예 키를 반대로 뒤집어 정상화 시킴
     if kpts[5,0] > kpts[6,0]:
         for a,b in pairs:
             kpts[[a,b]] = kpts[[b,a]]
     return kpts
 
+# =========================================================
+# Model
+# =========================================================
+
 # CNN
+# 사용 모델 tf_efficientnetv2_s.in21k_ft_in1k
+# 사전학습 imageNet 21k, 파인튜닝 imageNet 1k, 학습 시 - 2차 파인튜닝: top 레이어만 학습
 class ImageEncoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -174,7 +185,7 @@ class ImageEncoder(nn.Module):
 
         # top 레이어만 학습
         for name, param in self.model.named_parameters():
-            if "blocks.4" in name or "blocks.5" in name:
+            if "blocks.4" in name or "blocks.5" in name: # 끝부분만 동결 풀어서 학습시킴 (추론에선 eval 모드라 학습 안됨)
                 param.requires_grad = True
 
     def forward(self, x):
@@ -183,6 +194,7 @@ class ImageEncoder(nn.Module):
         return x.flatten(1)
 
 # MLP
+# (128) -> (256) -> (512)
 class KeypointEncoder(nn.Module):
     def __init__(self):
         super().__init__()
@@ -201,6 +213,7 @@ class KeypointEncoder(nn.Module):
         return self.net(kpts.flatten(1))
 
 # 모델 본체
+# CNN(1280) + MLP(512) -> 5
 class SleepPoseNet(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
@@ -221,7 +234,7 @@ class SleepPoseNet(nn.Module):
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-hybrid_weights = r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\pose_pt\pose_9_22e_rl1e-4_best\sleep_pose_best_model.pt"
+hybrid_weights = r"./pose_pt/pose_9_22e_rl1e-4_best/sleep_pose_best_model.pt"
 
 # ===== 추론 모델 로드 =====
 hybrid_model = SleepPoseNet(num_classes=5).to(device)
@@ -232,10 +245,11 @@ hybrid_model.eval()
 yolo_model = YOLO("yolo11n-pose.pt")
 
 
+# =========================================================
+# Main Method
+# =========================================================
 
-import pymysql
-from datetime import datetime
-
+# 스레드 종료 시 정보 DB 저장
 def save_to_mariadb(login_id, sleep_data_list):
     if not sleep_data_list:
         print("⚠️ 저장할 데이터가 없습니다.")
@@ -291,10 +305,12 @@ def save_to_mariadb(login_id, sleep_data_list):
     finally:
         conn.close()
 
+# RTSP 실행 및 
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
+    # DEBUG_MODE일 시 비디오 추론
     if DEBUG_MODE:
-        cap = cv2.VideoCapture(r"C:\Users\USER\Documents\Github\SleepPose\Inference_Server\data\lee_video\infer_Oh.mp4")
+        cap = cv2.VideoCapture(r".\data\lee_video\infer_Lee.mp4")
     else:
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
@@ -330,7 +346,10 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
     ]
 
     detected_pose = 4 # 기본값 (others)
+
     try:
+        # stop_flag()이 람다 함수가 bool값이 바뀌는 것을 감지, inference_running = False 되기 이전까지 반복문이 실행
+        # DEBUG_MODE일 땐 영상이 종료되었을 때 자동 종료
         while not stop_flag():
             if DEBUG_MODE:
                 ret, frame = cap.read()
@@ -357,21 +376,22 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
 
             # 1. 자세 결정 (사람 유무에 따라)
             if len(result.boxes) > 0 and result.keypoints is not None:
-                # [사람이 있을 때] 기존 GPU 최적화 로직 그대로 수행
                 bbox_xyxy = result.boxes.xyxy[0]
                 x1, y1, x2, y2 = bbox_xyxy.int().tolist()
-                bbox_pixel = (x1, y1, x2, y2)
-                bbox_norm = result.boxes.xyxyn[0]
+                bbox_pixel = (x1, y1, x2, y2) # 원본 픽셀 기준 바운딩박스 (이미지 크롭에 필요)
+                bbox_norm = result.boxes.xyxyn[0] # 정규화된 바운딩박스 (MLP 데이터에 필요)
 
-                kpts_norm = result.keypoints.xyn[0]
+                kpts_norm = result.keypoints.xyn[0] # 정규화된 키포인트 (17, 2) (MLP 데이터에 필요)
                 kpts_norm = enforce_lr_consistency(kpts_norm) # 급격한 뒤집힘 방지
                 kpts_norm = ema(prev_kpts_norm, kpts_norm, KPT_ALPHA) # 키포인트 스무스 이동
                 prev_kpts_norm = kpts_norm.clone()
-                kpts_conf = result.keypoints.conf[0].unsqueeze(1)
-                kpts_n = torch.cat([kpts_norm, kpts_conf], dim=1)
+                kpts_conf = result.keypoints.conf[0].unsqueeze(1) # 키포인트 신뢰도 (17, 1)
+                kpts_n = torch.cat([kpts_norm, kpts_conf], dim=1) # 정규화된 키포인트 + 신뢰도 (17, 3)
 
+                # 이미지 크롭, MLP용 데이터 생성
                 img_t, kpt_t = build_hybrid_inputs(frame, bbox_pixel, bbox_norm, kpts_n, device)
                 if img_t is None or kpt_t is None: continue
+                # 우리가 만든 모델에 추론
                 detected_pose = predict_with_distinction(hybrid_model, img_t, kpt_t, device)
             else:
                 # [사람이 없을 때] 강제로 Others(4) 처리
@@ -386,10 +406,11 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                     pending_start_time = now
                     consistent_count = 1
                 
+                # 지정한 OFFSET 이상 자세가 유지되어야 이전 자세의 데이터 기록
                 if consistent_count >= OFFSET:
                     if current_pose != INF:
                         sleep_timeline.append({
-                            'pose': current_pose,
+                            'pose': str(current_pose),
                             'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
                             'end': pending_start_time.strftime('%Y-%m-%d %H:%M:%S')
                         })
@@ -402,14 +423,14 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                 pending_pose = None
 
     finally:
-
         # 반복문 종료 시 마지막 자세 저장
         if current_pose != INF:
             sleep_timeline.append({
-                'pose': current_pose,
+                'pose': str(current_pose),
                 'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
                 'end': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             })
+
         if stop_flag() and not DEBUG_MODE:
             process.terminate()
         cv2.destroyAllWindows() # (디버깅용)
