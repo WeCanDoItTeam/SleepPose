@@ -12,7 +12,7 @@ from Inference_Server.inference.db_utils import get_db_connection
 SAMPLE_RATE = 16000
 CHUNK_DURATION = 1  # 1초
 CHUNK_SIZE = SAMPLE_RATE * CHUNK_DURATION * 2  # 16bit = 2bytes -> 32000 bytes
-CONF_THRESHOLD = 0.6  # 시작 임계값 (60%)
+CONF_THRESHOLD = 0.85  # 시작 임계값 (60%)
 SILENCE_TIMEOUT = 10  # 다른 이벤트나 소음이 지속되면 종료할 시간 (초)
 RECORDING_DIR = "./recordings"  # 녹음 파일 저장 경로
 
@@ -85,7 +85,7 @@ def load_audio_model(model_path, device='cuda'):
     return model
 
 
-# --- 2. 오디오 추론 엔진 (배치 처리 구조로 변경) ---
+# --- 2. 오디오 추론 엔진 (시간 계산 로직 수정) ---
 class AudioInferenceEngine:
     def __init__(self, model, device, login_id):
         self.model = model
@@ -97,7 +97,11 @@ class AudioInferenceEngine:
         self.silence_counter = 0         
         
         self.audio_buffer = []           
-        self.session_start_time = None   
+        
+        # [수정] 시간 관리를 위한 변수
+        self.base_timestamp = datetime.now() # 엔진 시작 시각 (기준점)
+        self.processed_seconds = 0.0         # 현재까지 처리한 오디오 길이 (초)
+        self.current_start_offset = 0.0      # 현재 세션이 시작된 오디오 시점 (초)
         
         self.session_timeline = []
 
@@ -131,63 +135,66 @@ class AudioInferenceEngine:
             # [RECORDING]
             self.audio_buffer.append(audio_bytes)
 
-            # 엄격한 클래스 유지 로직
             if label == self.start_event_class:
                 self.silence_counter = 0 
             else:
                 self.silence_counter += 1 
 
-            # 종료 조건 체크 (10초 이상 본래 이벤트 미감지)
+            # 종료 조건 체크
             if self.silence_counter >= SILENCE_TIMEOUT:
-                # 여기서 _end_session을 호출하면 후처리(Trimming)가 진행됨
                 print(f"⏹ [END] Silence Timeout Reached. Trimming last {self.silence_counter}s...")
                 self._end_session()
+
+        # [중요] 청크 처리가 끝날 때마다 오디오 시간 누적 (항상 1초씩 증가)
+        self.processed_seconds += CHUNK_DURATION
 
     def _start_session(self, label, first_chunk):
         self.is_recording = True
         self.start_event_class = label
         self.silence_counter = 0
-        self.session_start_time = datetime.now()
         self.audio_buffer = [first_chunk]
+        
+        # [수정] 시작 시간 = 기준 시간 + 현재까지 흐른 오디오 시간
+        # datetime.now()를 쓰지 않아 파일 처리 속도와 무관하게 정확한 타임스탬프 계산
+        self.current_start_offset = self.processed_seconds
 
     def _end_session(self):
-        """세션 종료: 뒷부분(침묵/Noise 구간)을 잘라내고 저장"""
-        now_time = datetime.now()
-        trim_seconds = self.silence_counter # 잘라내야 할 시간 (초)
+        trim_seconds = self.silence_counter 
 
-        # 1. 실제 종료 시간 보정 (현재 시간 - 기다린 시간)
-        real_end_time = now_time - timedelta(seconds=trim_seconds)
+        # [수정] 종료 시간 계산
+        # 종료 시점 오디오 시간 = 현재 누적 오디오 시간 - Trim 시간
+        real_end_offset = self.processed_seconds - trim_seconds
         
-        # 2. 오디오 버퍼 슬라이싱 (Trimming)
-        # buffer[:-0]은 빈 리스트가 되므로 trim_seconds > 0일 때만 처리
+        # 1. 오디오 버퍼 Trimming
         if trim_seconds > 0:
-            # 마지막 n초 데이터를 버림
             final_audio_data = self.audio_buffer[:-trim_seconds]
         else:
-            # 강제 종료 등으로 인해 카운터가 0이면 그대로 저장
             final_audio_data = self.audio_buffer
 
-        # 혹시라도 버퍼가 비어버리면(이벤트가 너무 짧았을 경우) 최소 1초는 유지
         if not final_audio_data and self.audio_buffer:
              final_audio_data = self.audio_buffer[:1]
 
-        # 3. 파일 저장 (잘린 데이터로 저장)
-        timestamp = self.session_start_time.strftime("%Y%m%d_%H%M%S")
+        # 2. Datetime 변환 (DB 저장용)
+        # 기준 시각에 오프셋(초)을 더해서 최종 시간 계산
+        st_dt = self.base_timestamp + timedelta(seconds=self.current_start_offset)
+        ed_dt = self.base_timestamp + timedelta(seconds=real_end_offset)
+
+        # 3. 파일 저장
+        timestamp = st_dt.strftime("%Y%m%d_%H%M%S")
         filename = f"{self.login_id}_{timestamp}_{self.start_event_class}.wav"
         full_filepath = os.path.join(RECORDING_DIR, filename)
         
         self._save_wav(full_filepath, final_audio_data)
         
-        # 실제 저장된 오디오 길이 계산 (로그용)
         duration_sec = len(final_audio_data)
         print(f"   ✂️ Trimmed: {trim_seconds}s removed. Final Duration: {duration_sec}s")
+        print(f"   🕒 Time: {st_dt} ~ {ed_dt}")
 
-        # 4. 타임라인 추가 (DB 저장용)
-        # DB에도 '감지 종료 후 10초 뒤'가 아닌 '실제 소리가 끝난 시간'을 기록
+        # 4. 타임라인 추가
         self.session_timeline.append({
             'class': self.start_event_class,
-            'start': self.session_start_time,
-            'end': real_end_time,  # 보정된 종료 시간
+            'start': st_dt, # 계산된 시작 시간
+            'end': ed_dt,   # 계산된 종료 시간 (무조건 start보다 뒤임)
             'path': full_filepath
         })
 
@@ -211,8 +218,6 @@ class AudioInferenceEngine:
     def force_close(self):
         if self.is_recording:
             print("⚠️ Force closing active audio session...")
-            # 강제 종료 시에는 Trimming을 할지 말지 결정해야 함
-            # 보통 강제 종료는 사용자가 끈 것이므로 현재까지 녹음된걸 다 저장하는게 안전
             self.silence_counter = 0 
             self._end_session()
         return self.session_timeline

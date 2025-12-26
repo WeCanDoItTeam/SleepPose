@@ -62,7 +62,7 @@ async def start_inference(userData: UserData):
 
     # rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
     # rtsp_url = "./data/oh_video/infer_Oh.mp4"
-    rtsp_url = "./data/sample_audio/david_snoring.m4a"
+    rtsp_url = "./data/oh_video/infer_Oh.mp4"
         
     state.stream_start_time = datetime.now()
     state.inference_running = True
