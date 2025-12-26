@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import calendar
 import uuid
-from datetime import datetime, timedelta,date
+from datetime import datetime, timedelta, date
+
 
 def startEndDate(yyyymm):
     year = int(yyyymm[:4])
@@ -13,18 +14,24 @@ def startEndDate(yyyymm):
     start_date = date(year, month, 1)  # 2025-03-01
     last_day = calendar.monthrange(year, month)[1]
     end_date = date(year, month, last_day)
-    return (start_date ,end_date)
+    return (start_date, end_date)
+
+
 def addDate(yyyymmdd):
     d = datetime.strptime(yyyymmdd, "%Y-%m-%d").date()
     next_day = d + timedelta(days=1)
     return str(next_day)
+
+
 def getUuid():
     chart_key = str(uuid.uuid4())
     return chart_key
+
+
 def ganttchart(user_id, st_dt):
     ed_dt = addDate(st_dt)
     # 1. 데이터 가져오기
-    (pose_data,audio_data) = get_sleep_day(user_id,st_dt,ed_dt)
+    (pose_data, audio_data) = get_sleep_day(user_id, st_dt, ed_dt)
     pose_df = pd.DataFrame(pose_data)
     if pose_df.empty:
         st.markdown("수면포즈 데이터가 없습니다")
@@ -50,28 +57,28 @@ def ganttchart(user_id, st_dt):
     mask = (pose_df['st_dt'] >= start_t) & (pose_df['st_dt'] <= end_t)
     view_pose_df = pose_df[mask].copy()
 
-    fig = px.timeline(view_pose_df , x_start='st_dt', x_end='ed_dt',
-                    y='pose_class',
-                    color='pose_class',
-                    color_discrete_map={
-                        '0': '#1f77b4',
-                        '1': '#ff7f0e',
-                        '2': '#2ca02c',
-                        '3': "#9432d6",
-                        '4': "#b0cf3f",
-                    },
-                    title="수면포즈 시분초 Gantt 차트")
+    fig = px.timeline(view_pose_df, x_start='st_dt', x_end='ed_dt',
+                      y='pose_class',
+                      color='pose_class',
+                      color_discrete_map={
+                          '0': '#1f77b4',
+                          '1': '#ff7f0e',
+                          '2': '#2ca02c',
+                          '3': "#9432d6",
+                          '4': "#b0cf3f",
+                      },
+                      title="수면포즈 시분초 Gantt 차트")
     fig.update_xaxes(type='date'
                      , tickformat='%H시'
-                     , dtick=3600*1000
-                     ) # 5분 간격 (300*1000ms) 60*60=3600 )  # x축은 타입/포맷만
+                     , dtick=3600 * 1000
+                     )  # 5분 간격 (300*1000ms) 60*60=3600 )  # x축은 타입/포맷만
     fig.update_layout(
         xaxis_title='시간대(시)',  # 12, 13, 14 ...
         yaxis_title='',
         showlegend=False
     )
     chartkey = getUuid()
-    st.plotly_chart(fig,key=chartkey, width='stretch')
+    st.plotly_chart(fig, key=chartkey, width='stretch')
     audio_df = pd.DataFrame(audio_data)
     if audio_df.empty:
         st.markdown("코골이,이갈이 데이터가 없습니다")
@@ -101,22 +108,24 @@ def ganttchart(user_id, st_dt):
         showlegend=False
     )
     chartkey = getUuid()
-    st.plotly_chart(fig,key=chartkey, width='stretch')
+    st.plotly_chart(fig, key=chartkey, width='stretch')
+
+
 def heatmapChart(user_id, st_dt):
-    #1달간 시간대별 자세 소요시간 집계
-    (start_date ,end_date) = startEndDate(st_dt)
-    (pose_data,audio_data) = get_sleep_month(user_id,str(start_date),str(end_date))
+    # 1달간 시간대별 자세 소요시간 집계
+    (start_date, end_date) = startEndDate(st_dt)
+    (pose_data, audio_data) = get_sleep_month(user_id, str(start_date), str(end_date))
 
     pose_df = pd.DataFrame(pose_data)
     if pose_df.empty:
         st.markdown("## 데이터가 없습니다")
         return
 
-    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)#시간대별
+    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)  # 시간대별
     pose_df['pose_class'] = pose_df['pose_class'].astype(str)
-    pose_df['minutes'] = pose_df['minutes'].astype(float)#소요시간(분)
+    pose_df['minutes'] = pose_df['minutes'].astype(float)  # 소요시간(분)
     pose_df['pose_nm'] = pose_df['pose_nm'].astype(str)
-    
+
     fig = px.density_heatmap(
         pose_df,
         x='hour_slot',
@@ -125,15 +134,14 @@ def heatmapChart(user_id, st_dt):
         color_continuous_scale='Viridis',
         title='한달간 시간대별 자세 소요시간 Heatmap(분)'
     )
-    
+
     fig.update_layout(
-        xaxis_title='시간대(시)',      # 12, 13, 14 ...
-        yaxis_title='포즈 클래스',     # 0,1,2,3,4
+        xaxis_title='시간대(시)',  # 12, 13, 14 ...
+        yaxis_title='포즈 클래스',  # 0,1,2,3,4
         coloraxis_colorbar_title='시간합(분)'  # 색바 라벨
     )
     chartkey = getUuid()
-    st.plotly_chart(fig, width='stretch',key=chartkey)
-
+    st.plotly_chart(fig, width='stretch', key=chartkey)
 
     audio_df = pd.DataFrame(audio_data)
     if audio_df.empty:
@@ -162,27 +170,27 @@ def heatmapChart(user_id, st_dt):
     chartkey = getUuid()
     st.plotly_chart(fig, width='stretch', key=chartkey)
 
-def pieChart(user_id,  st_dt):
+
+def pieChart(user_id, st_dt):
     (start_date, end_date) = startEndDate(st_dt)
-    (pose_data,audio_data) = get_sleep_month(user_id, str(start_date), str(end_date))
+    (pose_data, audio_data) = get_sleep_month(user_id, str(start_date), str(end_date))
 
     pose_df = pd.DataFrame(pose_data)
     if pose_df.empty:
         st.markdown("## 데이터가 없습니다")
         return
 
-    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)#시간대별
+    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)  # 시간대별
     pose_df['pose_class'] = pose_df['pose_class'].astype(str)
-    pose_df['minutes'] = pose_df['minutes'].astype(float)#소요시간(분)
+    pose_df['minutes'] = pose_df['minutes'].astype(float)  # 소요시간(분)
     pose_df['pose_nm'] = pose_df['pose_nm'].astype(str)
-    
 
-    labels =pose_df['pose_nm'] .tolist()
-    values = pose_df['minutes'] .tolist()
+    labels = pose_df['pose_nm'].tolist()
+    values = pose_df['minutes'].tolist()
 
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, textinfo='label+percent',
-                                insidetextorientation='radial'
-                                )])
+                                 insidetextorientation='radial'
+                                 )])
     fig.update_layout(
         title=dict(
             text="월간 자세분석(%)",
@@ -191,8 +199,7 @@ def pieChart(user_id,  st_dt):
         ),
         showlegend=False,  # 범례 제거
     )
-    st.plotly_chart(fig, width='stretch',key=getUuid())
-
+    st.plotly_chart(fig, width='stretch', key=getUuid())
 
     audio_df = pd.DataFrame(audio_data)
     if audio_df.empty:
@@ -218,11 +225,12 @@ def pieChart(user_id,  st_dt):
         ),
         showlegend=False,  # 범례 제거
     )
-    st.plotly_chart(fig, width='stretch',key=getUuid())
+    st.plotly_chart(fig, width='stretch', key=getUuid())
 
-def barChart_Day(user_id,  st_dt):
+
+def barChart_Day(user_id, st_dt):
     (start_date, end_date) = startEndDate(st_dt)
-    (pose_data,audio_data)  = get_sleep_month(user_id, str(start_date), str(end_date), gubun='%d')
+    (pose_data, audio_data) = get_sleep_month(user_id, str(start_date), str(end_date), gubun='%d')
 
     pose_df = pd.DataFrame(pose_data)
 
@@ -230,45 +238,45 @@ def barChart_Day(user_id,  st_dt):
         st.markdown("## 데이터가 없습니다")
         return
 
-    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)#시간대별
+    pose_df['hour_slot'] = pose_df['hour_slot'].astype(int)  # 시간대별
     pose_df['pose_class'] = pose_df['pose_class'].astype(str)
-    pose_df['minutes'] = pose_df['minutes'].astype(float)#소요시간(분)
+    pose_df['minutes'] = pose_df['minutes'].astype(float)  # 소요시간(분)
     pose_df['pose_nm'] = pose_df['pose_nm'].astype(str)
-    
 
-    labels =pose_df['pose_nm'] .tolist()
-    values = pose_df['minutes'] .tolist()
+    labels = pose_df['pose_nm'].tolist()
+    values = pose_df['minutes'].tolist()
 
     long_df = px.data.medals_long()
-    fig = px.bar(pose_df, 
-             x="hour_slot", 
-             y="minutes", 
-             color="pose_nm",
-             barmode='stack',  # 병렬 막대
-             title="시간대별 포즈 소요시간(분)",
-             text="minutes",
-             color_discrete_map={
-                 '바로 누운 자세': '#1f77b4',
-                 '옆으로 누워자기': '#ff7f0e',
-                 '팔든 자세': '#2ca02c',
-                 '엎드린 자세': "#9432d6",
-                 '기타': "#b0cf3f"
-             }
-    )
+    fig = px.bar(pose_df,
+                 x="hour_slot",
+                 y="minutes",
+                 color="pose_nm",
+                 barmode='stack',  # 병렬 막대
+                 title="시간대별 포즈 소요시간(분)",
+                 text="minutes",
+                 color_discrete_map={
+                     '바로 누운 자세': '#1f77b4',
+                     '옆으로 누워자기': '#ff7f0e',
+                     '팔든 자세': '#2ca02c',
+                     '엎드린 자세': "#9432d6",
+                     '기타': "#b0cf3f"
+                 }
+                 )
     fig.update_layout(
-        xaxis_title='일별',      # 12, 13, 14 ...
-        yaxis_title='포즈 클래스' ,   # 0,1,2,3,4
+        xaxis_title='일별',  # 12, 13, 14 ...
+        yaxis_title='포즈 클래스',  # 0,1,2,3,4
         legend=dict(
-            y=-0.2,
+            y=-0.5,
             x=0.5,
             xanchor="center",
             yanchor="top",
             orientation="h",  # 이 줄 추가: 수평 범례
         ),
-        margin=dict(b=200)
+        margin=dict(b=200),
+        legend_title_text=''
     )
     fig.update_traces(legendgrouptitle_text=None)
-    st.plotly_chart(fig, width='stretch',key=getUuid())
+    st.plotly_chart(fig, width='stretch', key=getUuid())
 
     audio_df = pd.DataFrame(audio_data)
 
@@ -302,19 +310,22 @@ def barChart_Day(user_id,  st_dt):
         xaxis_title='일별',  # 12, 13, 14 ...
         yaxis_title='이갈이,코골이 클래스',  # 0,1,2,3,4
         legend=dict(
-            y=-0.2,
+            y=-0.5,
             x=0.5,
             xanchor="center",
             yanchor="top",
             orientation="h",  # 이 줄 추가: 수평 범례
         ),
-        margin=dict(b=200)
+        margin=dict(b=200),
+        legend_title_text=''
     )
     fig.update_traces(legendgrouptitle_text="")
-    st.plotly_chart(fig, width='stretch',key=getUuid())
+    st.plotly_chart(fig, width='stretch', key=getUuid())
+
+
 def barChart_Hour(user_id, st_dt):
     (start_date, end_date) = startEndDate(st_dt)
-    (pose_data,audio_data) = get_sleep_month(user_id, str(start_date), str(end_date))
+    (pose_data, audio_data) = get_sleep_month(user_id, str(start_date), str(end_date))
     pose_df = pd.DataFrame(pose_data)
 
     if pose_df.empty:
@@ -349,17 +360,17 @@ def barChart_Hour(user_id, st_dt):
         xaxis_title='시간대(시)',  # 12, 13, 14 ...
         yaxis_title='포즈 클래스',  # 0,1,2,3,4
         legend=dict(
-            y=-0.2,
+            y=-0.5,
             x=0.5,
             xanchor="center",
             yanchor="top",
             orientation="h",  # 이 줄 추가: 수평 범례
         ),
-        margin=dict(b=200)
+        margin=dict(b=200),
+        legend_title_text = ''
     )
     fig.update_traces(legendgrouptitle_text="")
-    st.plotly_chart(fig, width='stretch',key=getUuid())
-
+    st.plotly_chart(fig, width='stretch', key=getUuid())
 
     audio_df = pd.DataFrame(audio_data)
     if audio_df.empty:
@@ -386,26 +397,28 @@ def barChart_Hour(user_id, st_dt):
                      '이갈이': '#1f77b4',
                      '코골이': '#ff7f0e',
                      '기타': "#b0cf3f"
-                 }
+                 },
                  )
     fig.update_layout(
         xaxis_title='시간대(시)',  # 12, 13, 14 ...
         yaxis_title='이갈이,코골이 클래스',  # 0,1,2,3,4
         legend=dict(
-            y=-0.2,
+            y=-0.5,
             x=0.5,
             xanchor="center",
             yanchor="top",
             orientation="h",  # 이 줄 추가: 수평 범례
         ),
-        margin=dict(b=200)
+        margin=dict(b=200),
+        legend_title_text=''
     )
     fig.update_traces(legendgrouptitle_text="")
     st.plotly_chart(fig, width='stretch', key=getUuid())
 
+
 def report_window():
     user_id = st.session_state.user_id
-    reportFlag = st.session_state.reportFlag #default:D
+    reportFlag = st.session_state.reportFlag  # default:D
     selected_chart = None
     selected_date = None
 
@@ -442,16 +455,16 @@ def report_window():
         with col2:
             pose_chart = ['0: 일간gantt']
             selected_chart = st.selectbox("그래프 선택", pose_chart, index=0)
-        selected_date =str(d)
+        selected_date = str(d)
 
     # 필터링 적용
     if selected_chart == "0: 일간gantt":
         ganttchart(user_id, selected_date)
-    elif( selected_chart == "1: 월간heatmap"):
+    elif (selected_chart == "1: 월간heatmap"):
         heatmapChart(user_id, selected_date)
-    elif( selected_chart == '2: 월간_자세별'):
+    elif (selected_chart == '2: 월간_자세별'):
         pieChart(user_id, selected_date)
-    elif( selected_chart == '3: 월간_시간별'):
+    elif (selected_chart == '3: 월간_시간별'):
         barChart_Hour(user_id, selected_date)
     elif (selected_chart == '4: 월간_일자별'):
         barChart_Day(user_id, selected_date)
