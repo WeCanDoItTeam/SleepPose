@@ -57,28 +57,49 @@ def ganttchart(user_id, st_dt):
     mask = (pose_df['st_dt'] >= start_t) & (pose_df['st_dt'] <= end_t)
     view_pose_df = pose_df[mask].copy()
 
-    fig = px.timeline(view_pose_df, x_start='st_dt', x_end='ed_dt',
-                      y='pose_class',
-                      color='pose_class',
-                      color_discrete_map={
-                          '0': '#1f77b4',
-                          '1': '#ff7f0e',
-                          '2': '#2ca02c',
-                          '3': "#9432d6",
-                          '4': "#b0cf3f",
-                      },
-                      title="수면포즈 시분초 Gantt 차트")
-    fig.update_xaxes(type='date'
-                     , tickformat='%H시'
-                     , dtick=3600 * 1000
-                     )  # 5분 간격 (300*1000ms) 60*60=3600 )  # x축은 타입/포맷만
-    fig.update_layout(
-        xaxis_title='시간대(시)',  # 12, 13, 14 ...
-        yaxis_title='',
-        showlegend=False
+    fig = px.timeline(
+        view_pose_df,
+        x_start='st_dt',
+        x_end='ed_dt',
+        y='pose_class',
+        color='pose_class',
+        color_discrete_map={
+            '0': '#1f77b4',
+            '1': '#ff7f0e',
+            '2': '#2ca02c',
+            '3': "#9432d6",
+            '4': "#b0cf3f",
+        },
+        title="수면포즈 시분초 Gantt 차트"
     )
-    chartkey = getUuid()
-    st.plotly_chart(fig, key=chartkey, width='stretch')
+
+    fig.update_layout(
+        xaxis_title='시간대(시)',
+        yaxis_title='',
+        showlegend=False,
+        dragmode=False,              # ✅ 드래그 차단
+        xaxis=dict(
+            type='date',
+            tickformat='%H시',
+            dtick=3600 * 1000,
+            fixedrange=True,         # ✅ 확대/이동 차단
+            rangeslider=dict(visible=False)  # ✅ 위에 생기는 스크롤 제거
+        ),
+        yaxis=dict(fixedrange=True)  # ✅ Y축도 고정
+    )
+
+    # 🔥 Plotly 인터랙션 완전 차단
+    st.plotly_chart(
+        fig,
+        key=getUuid(),
+        use_container_width=True,
+        config={
+            "scrollZoom": False,     # ✅ 마우스 휠 확대 차단
+            "displayModeBar": False, # (선택) 우측 툴바 제거
+            "doubleClick": False     # 더블클릭 확대 차단
+        }
+    )
+    
     audio_df = pd.DataFrame(audio_data)
     if audio_df.empty:
         st.markdown("코골이,이갈이 데이터가 없습니다")
@@ -87,28 +108,48 @@ def ganttchart(user_id, st_dt):
     mask = (audio_df['st_dt'] >= start_t) & (audio_df['st_dt'] <= end_t)
     view_audio_df = audio_df[mask].copy()
 
-    fig = px.timeline(view_audio_df, x_start='st_dt', x_end='ed_dt',
-                      y='audio_class',
-                      color='audio_class',
-                      color_discrete_map={
-                          '0': '#1f77b4',
-                          '1': '#ff7f0e',
-                          '2': '#2ca02c',
-                          '3': "#9432d6",
-                          '4': "#b0cf3f",
-                      },
-                      title="코골이,이갈이 시분초 Gantt 차트")
-    fig.update_xaxes(type='date'
-                     , tickformat='%H시'
-                     , dtick=3600 * 1000
-                     )  # 5분 간격 (300*1000ms) 60*60=3600 )  # x축은 타입/포맷만
-    fig.update_layout(
-        xaxis_title='시간대(시)',  # 12, 13, 14 ...
-        yaxis_title='',
-        showlegend=False
+    fig = px.timeline(
+        view_audio_df,
+        x_start='st_dt',
+        x_end='ed_dt',
+        y='audio_class',
+        color='audio_class',
+        color_discrete_map={
+            '0': '#1f77b4',
+            '1': '#ff7f0e',
+            '2': '#2ca02c',
+            '3': "#9432d6",
+            '4': "#b0cf3f",
+        },
+        title="코골이·이갈이 시분초 Gantt 차트"
     )
-    chartkey = getUuid()
-    st.plotly_chart(fig, key=chartkey, width='stretch')
+
+    fig.update_layout(
+        xaxis_title='시간대(시)',
+        yaxis_title='',
+        showlegend=False,
+        dragmode=False,  # ✅ 드래그 줌 차단
+        xaxis=dict(
+            type='date',
+            tickformat='%H시',
+            dtick=3600 * 1000,
+            fixedrange=True,                 # ✅ 확대/이동 차단
+            rangeslider=dict(visible=False)  # ✅ 상단 스크롤 제거
+        ),
+        yaxis=dict(fixedrange=True)          # ✅ Y축 고정
+    )
+
+    st.plotly_chart(
+        fig,
+        key=getUuid(),
+        use_container_width=True,
+        config={
+            "scrollZoom": False,     # ✅ 마우스 휠 확대 차단
+            "displayModeBar": False, # (선택) 우측 툴바 제거
+            "doubleClick": False     # 더블클릭 확대 차단
+        }
+    )
+
 
 
 def heatmapChart(user_id, st_dt):
