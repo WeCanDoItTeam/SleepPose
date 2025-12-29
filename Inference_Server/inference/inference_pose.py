@@ -16,11 +16,11 @@ DEBUG_MODE = False
 WIDTH, HEIGHT = 640, 640
 FRAME_SKIP = 5  # 총 15fps 중 3fps만 처리하기 위해 5프레임당 1회 추론
 FRAME_SIZE = WIDTH * HEIGHT * 3
-OFFSET = 9  # 약 6초(3fps * 3s) 동안 자세가 유지되어야 변경으로 인정 (메서드에서 조건부 변경)
 INF = -123456789 # Pose_id 초기값
 CONF_THRES = 0.7 # 키포인트 신뢰도 기준
 IOU_THRES = 0.5 # yolo용 iou 기준
 KPT_ALPHA = 0.85 # 키포인트 스무스 이동을 위한 조정값
+SAVE_INTERVAL_SEC = 60 * 5  # 5분마다 중간 저장
 
 # =========================================================
 # Utils
@@ -233,7 +233,8 @@ class SleepPoseNet(nn.Module):
         f_kpt = self.kpt_enc(kpts)
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+use_cuda = torch.cuda.is_available()
+device = 0 if use_cuda else 'cpu'
 hybrid_weights = r"./pose_pt/pose_9_22e_rl1e-4_best/sleep_pose_best_model.pt"
 
 # ===== 추론 모델 로드 =====
@@ -308,12 +309,11 @@ def save_to_mariadb(login_id, sleep_data_list):
 # [메인 함수] RTSP 실행 및 추론, 데이터 가공 저장
 def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_id: int):
 
+    OFFSET = 18 if DEBUG_MODE else 9 # 디버그 모드면 6초, RTSP면 3초
     # DEBUG_MODE일 시 비디오 추론
     if DEBUG_MODE:
-        OFFSET = 18 # 6초 오프셋
         cap = cv2.VideoCapture(r".\data\lee_video\infer_Lee.mp4")
     else:
-        OFFSET = 9 # 3초 오프셋
         cmd = [
             ffmpeg_path, "-rtsp_transport", "tcp", "-fflags", "nobuffer",
             "-flags", "low_delay", "-i", rtsp_url,
@@ -326,6 +326,8 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
     # --- 자세 기록용 변수 ---
     sleep_timeline = []  # 최종 DB로 보낼 리스트
     
+    last_save_time = datetime.now() 
+
     current_pose = INF
     start_time = datetime.now()
     
@@ -360,7 +362,13 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                     break
             else:
                 raw_frame = process.stdout.read(FRAME_SIZE)
-                if len(raw_frame) != FRAME_SIZE: break
+                if not raw_frame or len(raw_frame) < FRAME_SIZE:
+                    print("❌ RTSP 프레임 수신 실패")
+                    break
+
+                if process.poll() is not None:
+                    print("❌ FFmpeg 프로세스 종료")
+                    break
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
             frame = ir_preprocess(frame) # 적외선 환경 처리
@@ -373,7 +381,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
             now = datetime.now()
 
             # ===== YOLO 추론 =====
-            results = yolo_model(frame, imgsz=640, device=0, half=True, verbose=False, conf=CONF_THRES, iou=IOU_THRES)
+            results = yolo_model(frame, imgsz=640, device=device, half=use_cuda, verbose=False, conf=CONF_THRES, iou=IOU_THRES)
             result = results[0]
 
             # 1. 자세 결정 (사람 유무에 따라)
@@ -423,6 +431,26 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
             else:
                 consistent_count = 0
                 pending_pose = None
+
+            # ===============================
+            # ⏱️ 주기적 DB 저장
+            # ===============================
+            if (now - last_save_time).total_seconds() >= SAVE_INTERVAL_SEC:
+                if current_pose != INF:
+                    sleep_timeline.append({
+                        'pose': str(current_pose),
+                        'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'end': now.strftime('%Y-%m-%d %H:%M:%S')
+                    })
+
+                if sleep_timeline:
+                    print(f"⏱️ 중간 저장: {len(sleep_timeline)}건")
+                    try:
+                        save_to_mariadb(login_id, sleep_timeline)
+                        sleep_timeline.clear()
+                        last_save_time = now
+                    except Exception as e:
+                        print("⚠️ 중간 저장 실패, 다음 주기에 재시도", e)
 
     finally:
         # 반복문 종료 시 마지막 자세 저장
