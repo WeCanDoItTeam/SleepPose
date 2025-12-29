@@ -3,6 +3,7 @@ import db_utils
 from datetime import datetime, timedelta
 import pandas as pd
 from db_utils import get_db_connection, get_sleep_data
+from report_llm import get_llm
 
 # 포즈/오디오 클래스 정의 재사용
 POSE_CLASSES = {
@@ -134,7 +135,7 @@ def report_window():
         st.info("해당 기간 동안 분석된 오디오 데이터가 없습니다.")
         
     st.markdown("---")
-    
+
     # 하단 버튼 배치
     col_home, col_rerun = st.columns(2)
     with col_home:
@@ -144,3 +145,12 @@ def report_window():
     with col_rerun:
         if st.button("🔄 리포트 새로고침", use_container_width=True):
             st.rerun()
+
+    st.subheader("🤖 AI 수면 코칭 요약")
+
+    with st.spinner("AI가 수면 데이터를 분석 중입니다..."):
+        llm_response = get_llm((pose_data, audio_data))
+
+    st.markdown(llm_response)
+
+
