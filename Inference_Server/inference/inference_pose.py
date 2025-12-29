@@ -10,7 +10,7 @@ import timm
 from Inference_Server.inference.db_utils import get_db_connection
 
 # 디버그 모드 (True : 비디오 재생 / False : RTSP)
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 # 설정값
 WIDTH, HEIGHT = 640, 640
@@ -362,13 +362,13 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                     break
             else:
                 raw_frame = process.stdout.read(FRAME_SIZE)
-                if not raw_frame or len(raw_frame) < FRAME_SIZE:
-                    print("❌ RTSP 프레임 수신 실패")
-                    break
+            if not raw_frame or len(raw_frame) < FRAME_SIZE:
+                print("❌ RTSP 프레임 수신 실패")
+                break
 
-                if process.poll() is not None:
-                    print("❌ FFmpeg 프로세스 종료")
-                    break
+            if process.poll() is not None:
+                print("❌ FFmpeg 프로세스 종료")
+                break
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
             frame = ir_preprocess(frame) # 적외선 환경 처리
