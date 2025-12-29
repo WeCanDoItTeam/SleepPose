@@ -234,7 +234,7 @@ class SleepPoseNet(nn.Module):
         return self.classifier(torch.cat([f_img, f_kpt], dim=1))
 
 use_cuda = torch.cuda.is_available()
-device = 0 if use_cuda else 'cpu'
+device = 'cuda' if use_cuda else 'cpu'
 hybrid_weights = r"./pose_pt/pose_9_22e_rl1e-4_best/sleep_pose_best_model.pt"
 
 # ===== 추론 모델 로드 =====
@@ -362,13 +362,13 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                     break
             else:
                 raw_frame = process.stdout.read(FRAME_SIZE)
-            if not raw_frame or len(raw_frame) < FRAME_SIZE:
-                print("❌ RTSP 프레임 수신 실패")
-                break
+                if not raw_frame or len(raw_frame) < FRAME_SIZE:
+                    print("❌ RTSP 프레임 수신 실패")
+                    break
 
-            if process.poll() is not None:
-                print("❌ FFmpeg 프로세스 종료")
-                break
+                if process.poll() is not None:
+                    print("❌ FFmpeg 프로세스 종료")
+                    break
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3)).copy()
 
             frame = ir_preprocess(frame) # 적외선 환경 처리
