@@ -1,37 +1,25 @@
-from fastapi import FastAPI, HTTPException
+import os
+from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
 import threading
-from Inference_Server.inference.inference_pose import run_ffmpeg_yolo
+import time
+
+# 1. 영상 추론 모듈 (기존 파일 유지)
+# from Inference_Server.inference.inference_pose import run_ffmpeg_yolo
+# 2. 오디오 추론 모듈 (새로 만든 파일)
+from Inference_Server.inference.inference_audio import run_audio_inference
 
 app = FastAPI()
 
-# 설정 및 전역 상태
 FFMPEG_PATH = r"C:\Program Files\ffmpeg\bin\ffmpeg.exe"
 
 class GlobalState:
-    stream_start_time = None # 최초 시작 시간
-    stream_end_time = None # 최종 종료 시간
-    inference_running = False # 추론 돌아가고 있는지 여부
-    inference_thread = None # 돌아가고 있는 추론 스레드
+    stream_start_time = None
+    stream_end_time = None
+    inference_running = False
 
 state = GlobalState()
-
-def inference_loop(rtsp_url: str, login_id: str):
-    # 전역 상태를 참조하여 루프 실행
-    # try:
-    run_ffmpeg_yolo(
-        rtsp_url=rtsp_url,
-        ffmpeg_path=FFMPEG_PATH,
-        stop_flag=lambda: not state.inference_running,
-        login_id= login_id
-    )
-
-        # 여기서 오디오 추론 메서드 실행
-
-    # finally:
-    #     state.inference_running = False
-    #     print("Inference loop terminated.")
 
 class UserData(BaseModel):
     login_id: str
@@ -39,37 +27,74 @@ class UserData(BaseModel):
     password: str
     ip: str
 
+# --- 비디오 스레드 함수 ---
+# def video_thread_func(rtsp_url, login_id):
+#     try:
+#         run_ffmpeg_yolo(
+#             rtsp_url=rtsp_url,
+#             ffmpeg_path=FFMPEG_PATH,
+#             stop_flag=lambda: not state.inference_running,
+#             login_id=login_id
+#         )
+#     except Exception as e:
+#         print(f"Video Thread Error: {e}")
+
+# --- 오디오 스레드 함수 ---
+def audio_thread_func(rtsp_url, login_id):
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        weights_path = os.path.join(base_dir, "yamnet_finetuned_best.pth")
+        print(f"🔍 Looking for weights at: {weights_path}")
+        # 여기서 오디오 추론 메서드 실행 (오디오 로직 + FFmpeg Subprocess)
+        run_audio_inference(
+            source=rtsp_url,
+            stop_flag=lambda: not state.inference_running,
+            login_id=login_id,
+            model_path=weights_path
+        )
+    except Exception as e:
+        print(f"Audio Thread Error: {e}")
+
 @app.post("/start")
 async def start_inference(userData: UserData):
     if state.inference_running:
-        return {"code": 400} # 이미 실행 중이면 400 에러 반환
+        return {"code": 400, "message": "Already running"}
 
-    rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
-
+    # rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
+    # rtsp_url = "./data/oh_video/infer_Oh.mp4"
+    rtsp_url = "./data/oh_video/infer_Oh.mp4"
+        
     state.stream_start_time = datetime.now()
     state.inference_running = True
 
-    state.inference_thread = threading.Thread(
-        target=inference_loop,
-        args=(rtsp_url,userData.login_id),
+    # 1. 영상 스레드 시작
+    # v_thread = threading.Thread(
+    #     target=video_thread_func,
+    #     args=(rtsp_url, userData.login_id),
+    #     daemon=True
+    # )
+    # v_thread.start()
+
+    # 2. 오디오 스레드 시작 (병렬 실행)
+    a_thread = threading.Thread(
+        target=audio_thread_func,
+        args=(rtsp_url, userData.login_id),
         daemon=True
     )
-    state.inference_thread.start()
+    a_thread.start()
 
-    return {"code": 200}
+    return {"code": 200, "message": "Started"}
 
 @app.post("/end")
 async def end_inference():
     if not state.inference_running:
-        return {"code": 500} # 종료 할 스트림이 없음 (예시 리턴입니다)
+        return {"code": 500, "message": "Not running"}
 
     state.inference_running = False
     state.stream_end_time = datetime.now()
 
-    # 스레드가 종료될 때까지 기다리지 않고 즉시 응답 (데몬 스레드이므로 플래그에 의해 종료됨)
-    return {"code": 200}
+    return {"code": 200, "message": "Stopping"}
 
-# 현재 상태 확인용 엔드포인트 (스트림릿에서 유용함)
 @app.get("/")
 async def get_status():
     return {

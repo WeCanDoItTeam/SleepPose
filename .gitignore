@@ -46,3 +46,11 @@ Scripts/
 # Streamlit secrets file
 .streamlit/secrets.toml
 Inference_Server/infer_images/back_frame_002450.jpg
+
+# =========================
+# 데이터
+# =========================
+# data
+data/
+*.wav
+*.mp4
