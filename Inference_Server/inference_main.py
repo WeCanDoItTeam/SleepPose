@@ -6,7 +6,7 @@ import threading
 import time
 
 # 1. 영상 추론 모듈 (기존 파일 유지)
-# from Inference_Server.inference.inference_pose import run_ffmpeg_yolo
+from Inference_Server.inference.inference_pose import run_ffmpeg_yolo
 # 2. 오디오 추론 모듈 (새로 만든 파일)
 from Inference_Server.inference.inference_audio import run_audio_inference
 
@@ -15,8 +15,6 @@ app = FastAPI()
 FFMPEG_PATH = r"C:\Program Files\ffmpeg\bin\ffmpeg.exe"
 
 class GlobalState:
-    stream_start_time = None
-    stream_end_time = None
     inference_running = False
 
 state = GlobalState()
@@ -28,16 +26,16 @@ class UserData(BaseModel):
     ip: str
 
 # --- 비디오 스레드 함수 ---
-# def video_thread_func(rtsp_url, login_id):
-#     try:
-#         run_ffmpeg_yolo(
-#             rtsp_url=rtsp_url,
-#             ffmpeg_path=FFMPEG_PATH,
-#             stop_flag=lambda: not state.inference_running,
-#             login_id=login_id
-#         )
-#     except Exception as e:
-#         print(f"Video Thread Error: {e}")
+def video_thread_func(rtsp_url, login_id):
+    try:
+        run_ffmpeg_yolo(
+            rtsp_url=rtsp_url,
+            ffmpeg_path=FFMPEG_PATH,
+            stop_flag=lambda: not state.inference_running,
+            login_id=login_id
+        )
+    except Exception as e:
+        print(f"Video Thread Error: {e}")
 
 # --- 오디오 스레드 함수 ---
 def audio_thread_func(rtsp_url, login_id):
@@ -61,19 +59,17 @@ async def start_inference(userData: UserData):
         return {"code": 400, "message": "Already running"}
 
     # rtsp_url = f"rtsp://{userData.user_id}:{userData.password}@{userData.ip}:554/stream2"
-    # rtsp_url = "./data/oh_video/infer_Oh.mp4"
-    rtsp_url = "./data/oh_video/infer_Oh.mp4"
+    rtsp_url = "./data/lee_video/infer_Lee.mp4"
         
-    state.stream_start_time = datetime.now()
     state.inference_running = True
 
     # 1. 영상 스레드 시작
-    # v_thread = threading.Thread(
-    #     target=video_thread_func,
-    #     args=(rtsp_url, userData.login_id),
-    #     daemon=True
-    # )
-    # v_thread.start()
+    v_thread = threading.Thread(
+        target=video_thread_func,
+        args=(rtsp_url, userData.login_id),
+        daemon=True
+    )
+    v_thread.start()
 
     # 2. 오디오 스레드 시작 (병렬 실행)
     a_thread = threading.Thread(
@@ -91,7 +87,6 @@ async def end_inference():
         return {"code": 500, "message": "Not running"}
 
     state.inference_running = False
-    state.stream_end_time = datetime.now()
 
     return {"code": 200, "message": "Stopping"}
 

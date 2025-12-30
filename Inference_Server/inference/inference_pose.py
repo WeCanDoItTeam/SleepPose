@@ -165,6 +165,61 @@ def enforce_lr_consistency(kpts):
             kpts[[a,b]] = kpts[[b,a]]
     return kpts
 
+# =========================
+# Debug Visualization
+# =========================
+POSE_LABELS = {
+    0: "Laying",
+    1: "Side",
+    2: "Hand up",
+    3: "Back",
+    4: "Others"
+}
+
+def draw_debug_view(frame, bbox, kpts, pose_id, skeleton):
+    vis = frame.copy()
+
+    # 1️⃣ Bounding Box
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    # 2️⃣ Keypoints & Skeleton
+    if kpts is not None:
+        h, w = frame.shape[:2]
+
+        # 픽셀 좌표 변환 (x, y만)
+        kpts_px = (kpts[:, :2] * np.array([w, h])).astype(int)
+
+        # keypoints
+        for i, (x, y) in enumerate(kpts_px):
+            conf = kpts[i, 2]
+            if conf > 0.4:
+                cv2.circle(vis, (x, y), 3, (0, 0, 255), -1)
+
+        # skeleton
+        for a, b in skeleton:
+            if kpts[a, 2] > 0.4 and kpts[b, 2] > 0.4:
+                pt1 = tuple(kpts_px[a])
+                pt2 = tuple(kpts_px[b])
+                cv2.line(vis, pt1, pt2, (255, 0, 0), 2)
+
+    # 3️⃣ Pose label
+    label = POSE_LABELS.get(pose_id, "Unknown")
+    cv2.putText(
+        vis,
+        f"Pose: {label}",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.1,
+        (0, 255, 255),
+        3
+    )
+
+    return vis
+
+
+
 # =========================================================
 # Model
 # =========================================================
@@ -403,6 +458,36 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                 if img_t is None or kpt_t is None: continue
                 # 우리가 만든 모델에 추론
                 detected_pose = predict_with_distinction(hybrid_model, img_t, kpt_t, device)
+                # ===============================
+                # DEBUG: OpenCV Visualization
+                # ===============================
+                if DEBUG_MODE:
+                    debug_bbox = bbox_pixel if 'bbox_pixel' in locals() else None
+                    debug_kpts = kpts_n.cpu().numpy() if 'kpts_n' in locals() else None
+
+                    vis_frame = draw_debug_view(
+                        frame,
+                        debug_bbox,
+                        debug_kpts,
+                        detected_pose,
+                        skeleton
+                    )
+
+                    debug_scale = 0.5  # 50% 크기
+
+                    small_vis = cv2.resize(
+                        vis_frame,
+                        None,
+                        fx=debug_scale,
+                        fy=debug_scale,
+                        interpolation=cv2.INTER_AREA
+                    )
+
+                    cv2.imshow("Sleep Pose Debug View", small_vis)
+
+                    # q 누르면 종료
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
             else:
                 # [사람이 없을 때] 강제로 Others(4) 처리
                 detected_pose = 4
