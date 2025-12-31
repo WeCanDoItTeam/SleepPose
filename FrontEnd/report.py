@@ -189,12 +189,23 @@ def report_window():
 
         st.subheader("🤖 AI 수면 코칭 요약")
 
-        with st.spinner("AI가 수면 데이터를 분석 중입니다..."):
-            llm_response = get_llm((pose_data, audio_data))
-            if llm_response:
-                st.markdown(llm_response)
-            else:
-                st.info("AI 분석 결과가 없습니다.")
+        # 세션 상태 key 설정 (유저 + 기간 기준)
+        ai_cache_key = f"ai_summary_{user_id}_{start_time.strftime('%Y%m%d%H%M%S')}_{end_time.strftime('%Y%m%d%H%M%S')}"
+
+        if ai_cache_key in st.session_state:
+            # ✅ 이미 AI 답변이 세션에 존재하면 불러오기
+            llm_response = st.session_state[ai_cache_key]
+            st.markdown(llm_response)
+        else:
+            # ✅ AI 답변이 없으면 새로 계산
+            with st.spinner("AI가 수면 데이터를 분석 중입니다..."):
+                llm_response = get_llm((pose_data, audio_data))
+                if llm_response:
+                    st.session_state[ai_cache_key] = llm_response  # 세션에 저장
+                    st.markdown(llm_response)
+                else:
+                    st.info("AI 분석 결과가 없습니다.")
+
 
         # 하단 버튼 배치
         col_home, col_rerun = st.columns(2)
@@ -203,7 +214,8 @@ def report_window():
                 st.session_state.page = 'login'
                 st.rerun()
         with col_rerun:
-            if st.button("🔄 리포트 새로고침", use_container_width=True):
+            if st.button("📊 리포트 통계", use_container_width=True):
+                st.session_state.page = 'summaryReport'
                 st.rerun()
 
 

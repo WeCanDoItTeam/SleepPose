@@ -244,7 +244,7 @@ def monitoring_window():
                 start_monitoring_callback(new_uid, new_upw, new_ip)
                 st.rerun()
         with col2:
-            if st.button("🔄 리포트 통계", use_container_width=True):
+            if st.button("📊 리포트 통계", use_container_width=True):
                 st.session_state.page = 'summaryReport'
                 st.rerun()          
     else:

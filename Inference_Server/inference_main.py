@@ -83,8 +83,8 @@ async def start_inference(userData: UserData):
 
 @app.post("/end")
 async def end_inference():
-    if not state.inference_running:
-        return {"code": 500, "message": "Not running"}
+    # if not state.inference_running:
+    #     return {"code": 500, "message": "Not running"}
 
     state.inference_running = False
 

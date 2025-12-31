@@ -95,14 +95,16 @@ class AudioInferenceEngine:
         self.is_recording = False
         self.start_event_class = None
         self.silence_counter = 0         
-        
+
         self.audio_buffer = []           
-        
-        # [수정] 시간 관리를 위한 변수
-        self.base_timestamp = datetime.now() # 엔진 시작 시각 (기준점)
-        self.processed_seconds = 0.0         # 현재까지 처리한 오디오 길이 (초)
-        self.current_start_offset = 0.0      # 현재 세션이 시작된 오디오 시점 (초)
-        
+
+        # 🎯 기준 시각 (영상 시작 시각과 동일해야 함)
+        self.base_timestamp = datetime.now()
+
+        # 🎯 실제 누적 오디오 시간 (초)
+        self.processed_seconds = 0.0
+        self.current_start_offset = 0.0
+
         self.session_timeline = []
 
         self.CLASS_NOISE = 0
@@ -110,117 +112,101 @@ class AudioInferenceEngine:
         self.CLASS_BRUXISM = 2
 
     def process_chunk(self, audio_float, audio_bytes):
-        # 1. 추론
+        # === 1. 실제 오디오 길이 계산 (핵심) ===
+        chunk_sec = len(audio_bytes) / (SAMPLE_RATE * 2)
+
+        # === 2. 추론 ===
         input_tensor = preprocess_audio_chunk(audio_float).to(self.device)
         with torch.no_grad():
             raw_output = self.model(input_tensor)
-            if isinstance(raw_output, (tuple, list)):
-                outputs = raw_output[0]
-            else:
-                outputs = raw_output
+            outputs = raw_output[0] if isinstance(raw_output, (tuple, list)) else raw_output
 
             probs = torch.nn.functional.softmax(outputs, dim=1)
             confidence, predicted = torch.max(probs, 1)
             label = predicted.item()
             conf = confidence.item()
 
-        # 2. 상태 머신 로직
+        # === 3. 상태 머신 ===
         if not self.is_recording:
-            # [IDLE] -> [START]
             if label in [self.CLASS_SNORE, self.CLASS_BRUXISM] and conf >= CONF_THRESHOLD:
-                print(f"🔊 [START] Audio Event Detected: Class {label} (Conf: {conf:.2f})")
+                print(f"🔊 [START] Audio Event {label} ({conf:.2f})")
                 self._start_session(label, audio_bytes)
-        
+
         else:
-            # [RECORDING]
             self.audio_buffer.append(audio_bytes)
 
             if label == self.start_event_class:
-                self.silence_counter = 0 
+                self.silence_counter = 0
             else:
-                self.silence_counter += 1 
+                self.silence_counter += chunk_sec
 
-            # 종료 조건 체크
             if self.silence_counter >= SILENCE_TIMEOUT:
-                print(f"⏹ [END] Silence Timeout Reached. Trimming last {self.silence_counter}s...")
+                print(f"⏹ [END] Silence Timeout ({self.silence_counter:.2f}s)")
                 self._end_session()
 
-        # [중요] 청크 처리가 끝날 때마다 오디오 시간 누적 (항상 1초씩 증가)
-        self.processed_seconds += CHUNK_DURATION
+        # ✅ 실제 시간만큼 누적
+        self.processed_seconds += chunk_sec
 
     def _start_session(self, label, first_chunk):
         self.is_recording = True
         self.start_event_class = label
-        self.silence_counter = 0
+        self.silence_counter = 0.0
         self.audio_buffer = [first_chunk]
-        
-        # [수정] 시작 시간 = 기준 시간 + 현재까지 흐른 오디오 시간
-        # datetime.now()를 쓰지 않아 파일 처리 속도와 무관하게 정확한 타임스탬프 계산
+
+        # 🎯 현재까지 흐른 실제 오디오 시간
         self.current_start_offset = self.processed_seconds
 
     def _end_session(self):
-        trim_seconds = self.silence_counter 
+        trim_sec = min(self.silence_counter, self.processed_seconds)
+        real_end_offset = self.processed_seconds - trim_sec
 
-        # [수정] 종료 시간 계산
-        # 종료 시점 오디오 시간 = 현재 누적 오디오 시간 - Trim 시간
-        real_end_offset = self.processed_seconds - trim_seconds
-        
-        # 1. 오디오 버퍼 Trimming
-        if trim_seconds > 0:
-            final_audio_data = self.audio_buffer[:-trim_seconds]
+        # === 버퍼 trimming ===
+        trim_chunks = int(trim_sec)  # 초 단위 기준
+        if trim_chunks > 0:
+            final_audio = self.audio_buffer[:-trim_chunks]
         else:
-            final_audio_data = self.audio_buffer
+            final_audio = self.audio_buffer
 
-        if not final_audio_data and self.audio_buffer:
-             final_audio_data = self.audio_buffer[:1]
+        if not final_audio and self.audio_buffer:
+            final_audio = self.audio_buffer[:1]
 
-        # 2. Datetime 변환 (DB 저장용)
-        # 기준 시각에 오프셋(초)을 더해서 최종 시간 계산
+        # === 시간 계산 ===
         st_dt = self.base_timestamp + timedelta(seconds=self.current_start_offset)
         ed_dt = self.base_timestamp + timedelta(seconds=real_end_offset)
 
-        # 3. 파일 저장
-        timestamp = st_dt.strftime("%Y%m%d_%H%M%S")
-        filename = f"{self.login_id}_{timestamp}_{self.start_event_class}.wav"
-        full_filepath = os.path.join(RECORDING_DIR, filename)
-        
-        self._save_wav(full_filepath, final_audio_data)
-        
-        duration_sec = len(final_audio_data)
-        print(f"   ✂️ Trimmed: {trim_seconds}s removed. Final Duration: {duration_sec}s")
-        print(f"   🕒 Time: {st_dt} ~ {ed_dt}")
+        # === 파일 저장 ===
+        filename = f"{self.login_id}_{st_dt.strftime('%Y%m%d_%H%M%S')}_{self.start_event_class}.wav"
+        filepath = os.path.join(RECORDING_DIR, filename)
+        self._save_wav(filepath, final_audio)
 
-        # 4. 타임라인 추가
+        print(f"🕒 {st_dt} ~ {ed_dt}  ({len(final_audio)}s)")
+
         self.session_timeline.append({
-            'class': self.start_event_class,
-            'start': st_dt, # 계산된 시작 시간
-            'end': ed_dt,   # 계산된 종료 시간 (무조건 start보다 뒤임)
-            'path': full_filepath
+            "class": self.start_event_class,
+            "start": st_dt,
+            "end": ed_dt,
+            "path": filepath
         })
 
-        # 초기화
+        # === reset ===
         self.is_recording = False
         self.audio_buffer = []
         self.start_event_class = None
-        self.silence_counter = 0
+        self.silence_counter = 0.0
 
     def _save_wav(self, filepath, buffer_list):
-        try:
-            with wave.open(filepath, 'wb') as wf:
-                wf.setnchannels(1) 
-                wf.setsampwidth(2) 
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(b''.join(buffer_list))
-            print(f"   💾 Saved recording: {filepath}")
-        except Exception as e:
-            print(f"   ❌ Failed to save wav: {e}")
+        with wave.open(filepath, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(b''.join(buffer_list))
 
     def force_close(self):
         if self.is_recording:
-            print("⚠️ Force closing active audio session...")
-            self.silence_counter = 0 
+            self.silence_counter = 0.0
             self._end_session()
         return self.session_timeline
+
 
 
 # --- 3. DB 일괄 저장 함수 ---
@@ -319,3 +305,5 @@ def run_audio_inference(source, stop_flag, login_id, model_path="yamnet_finetune
             save_audio_to_mariadb(login_id, final_timeline)
             
         print("🎤 Audio Inference Stopped Completely")
+
+        

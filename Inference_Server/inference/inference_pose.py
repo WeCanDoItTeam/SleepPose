@@ -486,7 +486,7 @@ def run_ffmpeg_yolo(rtsp_url: str, ffmpeg_path: str, stop_flag: callable, login_
                     cv2.imshow("Sleep Pose Debug View", small_vis)
 
                     # q 누르면 종료
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                    if cv2.waitKey(int(1000/15)) & 0xFF == ord('q'):
                         break
             else:
                 # [사람이 없을 때] 강제로 Others(4) 처리

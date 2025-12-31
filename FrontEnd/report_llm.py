@@ -10,6 +10,13 @@ MODEL_GPT_3_5_TURBO = "gpt-3.5-turbo" # 속도 낼 때. 무지 싸다
 MODEL_GPT_4O_MINI = "gpt-4o-mini" # 테스트용. 싸다
 MODEL_GPT_4 = "gpt-4" # 실전용. 비싸다
 
+POSE_NAME_MAP = {
+    0: "올바른 자세",
+    1: "옆으로 누운 자세",
+    2: "팔을 든 자세",
+    3: "엎드린 자세",
+}
+
 #======== [ 환경변수 가져오기 (.env) ] ========
 
 load_dotenv()
@@ -58,11 +65,14 @@ prompt_template = """
 | 팔을 든 자세 | {hand_up_time} | {hand_up_percent} |
 | 엎드린 자세 | {back_time} | {back_percent} |
 
+### 가장 시간이 긴 자세 
+- {longist_nm}
+
 ---
 
 ## 평가 기준
 - 올바른 자세 비율 ≥ 90% → 긍정적 평가 + 유지 팁
-- 올바른 자세 비율 < 90% → 가장 많이 나타난 비권장 자세 중심 조언
+- 올바른 자세 비율 < 90% → 가장 시간이 긴 자세 중심 조언
 
 ---
 
@@ -72,7 +82,7 @@ prompt_template = """
    - 격려 메시지
    - 현재 습관 유지 팁
 3. 상태가 부족한 경우:
-   - 비율이 높은 비권장 자세 선택
+   - 가장 시간이 긴 자세 선택
    - 부담 가능 부위와 이유 설명
    - 비의료적 개선 방법 제안 (스트레칭, 수면 습관, 베개 활용 등)
 
@@ -85,12 +95,12 @@ prompt_template = """
   > 오늘은 올바른 수면 자세로 대부분의 시간을 보내셨습니다.  
   > 전반적으로 잘 관리된 수면 패턴입니다.
 - 올바른 자세 90% 미만:
-  > n시간 동안 (가장 오래 유지된 비권장 자세)가 비교적 길게 유지되었습니다.
+  > n시간 동안 (가장 시간이 긴 자세)가 비교적 길게 유지되었습니다.
 
 ### [설명]
 - 올바른 자세 90% 이상: 수면 중 신체 정렬이 안정적으로 유지되어 근육과 관절이 충분히 이완되었을 수 있습니다.
 - 올바른 자세 90% 미만:  
-  - 주요 자세: (가장 오래 유지된 비권장 자세)  
+  - 주요 자세: (가장 시간이 긴 자세)  
   - 부담 가능 부위: 목, 어깨, 골반  
   - 이유: 한쪽 체중 집중으로 신체 균형이 깨질 수 있습니다.
 
@@ -195,6 +205,14 @@ def get_llm(data):
         pose_time_map = {int(k): v for k, v in pose_time_map.items()}
         pose_percentages = {int(k): v for k, v in pose_percentages.items()}
 
+        valid_pose_time_map = {k: v for k, v in pose_time_map.items() if v > 0}
+
+        if valid_pose_time_map:
+            longest_pose_id = max(valid_pose_time_map, key=valid_pose_time_map.get)
+            longest_pose_name = POSE_NAME_MAP.get(longest_pose_id, "알 수 없음")
+        else:
+            longest_pose_name = "분석 불가"
+
         input_data = {
             "total_sleep": total_time_sec,
 
@@ -209,6 +227,8 @@ def get_llm(data):
 
             "back_time": pose_time_map.get(3, 0.0),
             "back_percent": pose_percentages.get(3, 0.0),
+
+            "longist_nm": longest_pose_name
         }
 
         # 4. LLM 호출

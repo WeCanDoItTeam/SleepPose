@@ -7,6 +7,18 @@ import calendar
 import uuid
 from datetime import datetime, timedelta, date
 
+class ColorPalette:
+    laying = '#FCA47C'
+    side = '#F9D779'
+    hand_up = '#23CED9'
+    back = "#A1CCA6"
+    others = "#097C87"
+
+    snoring = '#A4D4D4'
+    bruxism = "#ECA0B0"
+    noise = "#847E7C"
+
+color = ColorPalette()
 
 def startEndDate(yyyymm):
     year = int(yyyymm[:4])
@@ -43,6 +55,7 @@ def ganttchart(user_id, st_dt):
     max_t = pose_df['ed_dt'].max()
 
     pose_df['pose_class'] = pose_df['pose_class'].astype(str)
+    
     # 1) Streamlit에서 깔끔한 범위 선택 UI
     start_t, end_t = st.slider(
         '표시할 시간 범위',
@@ -63,12 +76,17 @@ def ganttchart(user_id, st_dt):
         x_end='ed_dt',
         y='pose_class',
         color='pose_class',
+        labels={
+            'st_dt': '시작 시간',
+            'ed_dt': '종료 시간',
+            'pose_class': '수면 자세'
+        },
         color_discrete_map={
-            '0': '#1f77b4',
-            '1': '#ff7f0e',
-            '2': '#2ca02c',
-            '3': "#9432d6",
-            '4': "#b0cf3f",
+            '바로 누운 자세': color.laying,
+            '옆으로 누워 자기': color.side,
+            '팔든 자세': color.hand_up,
+            '엎드린 자세': color.back,
+            '기타': color.others,
         },
         title="수면포즈 시분초 Gantt 차트"
     )
@@ -80,8 +98,8 @@ def ganttchart(user_id, st_dt):
         dragmode=False,              # ✅ 드래그 차단
         xaxis=dict(
             type='date',
-            tickformat='%H시',
-            dtick=3600 * 1000,
+            tickformat='%H:%M',          # ✅ 분 단위 표시
+            dtick=10 * 60 * 1000,        # ✅ 10분 간격
             fixedrange=True,         # ✅ 확대/이동 차단
             rangeslider=dict(visible=False)  # ✅ 위에 생기는 스크롤 제거
         ),
@@ -114,12 +132,15 @@ def ganttchart(user_id, st_dt):
         x_end='ed_dt',
         y='audio_class',
         color='audio_class',
+        labels={
+            'st_dt': '시작 시간',
+            'ed_dt': '종료 시간',
+            'audio_class': '음성 분류'
+        },
         color_discrete_map={
-            '0': '#1f77b4',
-            '1': '#ff7f0e',
-            '2': '#2ca02c',
-            '3': "#9432d6",
-            '4': "#b0cf3f",
+            '기타': color.noise,
+            '코골이': color.snoring,
+            '이갈이': color.bruxism
         },
         title="코골이·이갈이 시분초 Gantt 차트"
     )
@@ -131,8 +152,8 @@ def ganttchart(user_id, st_dt):
         dragmode=False,  # ✅ 드래그 줌 차단
         xaxis=dict(
             type='date',
-            tickformat='%H시',
-            dtick=3600 * 1000,
+            tickformat='%H:%M',          # ✅ 분 단위
+            dtick=10 * 60 * 1000,        # ✅ 10분 간격
             fixedrange=True,                 # ✅ 확대/이동 차단
             rangeslider=dict(visible=False)  # ✅ 상단 스크롤 제거
         ),
@@ -230,7 +251,9 @@ def pieChart(user_id, st_dt):
     values = pose_df['minutes'].tolist()
 
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, textinfo='label+percent',
-                                 insidetextorientation='radial'
+                                 insidetextorientation='radial',
+                                 marker=dict(colors=[color.laying, color.side, color.hand_up, color.back, color.others]),
+                                 hovertemplate='%{label}: %{value:.1f}분 (%{percent})<extra></extra>',
                                  )])
     fig.update_layout(
         title=dict(
@@ -256,7 +279,9 @@ def pieChart(user_id, st_dt):
     values = audio_df['minutes'].tolist()
 
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, textinfo='label+percent',
-                                 insidetextorientation='radial'
+                                 insidetextorientation='radial',
+                                 marker=dict(colors=[color.noise, color.snoring, color.bruxism]),
+                                 hovertemplate='%{label}: %{value:.1f}분 (%{percent})<extra></extra>',
                                  )])
     fig.update_layout(
         title=dict(
@@ -295,13 +320,18 @@ def barChart_Day(user_id, st_dt):
                  barmode='stack',  # 병렬 막대
                  title="시간대별 포즈 소요시간(분)",
                  text="minutes",
+                 labels={
+                    'hour_slot': '시간대 별',
+                    'minutes': '지속 시간(분)',
+                    'pose_nm': '자세 명'
+                    },
                  color_discrete_map={
-                     '바로 누운 자세': '#1f77b4',
-                     '옆으로 누워자기': '#ff7f0e',
-                     '팔든 자세': '#2ca02c',
-                     '엎드린 자세': "#9432d6",
-                     '기타': "#b0cf3f"
-                 }
+                    '바로 누운 자세': color.laying,
+                    '옆으로 누워 자기': color.side,
+                    '팔든 자세': color.hand_up,
+                    '엎드린 자세': color.back,
+                    '기타': color.others,
+                 },
                  )
     fig.update_layout(
         xaxis_title='일별',  # 12, 13, 14 ...
@@ -316,7 +346,12 @@ def barChart_Day(user_id, st_dt):
         margin=dict(b=200),
         legend_title_text=''
     )
-    fig.update_traces(legendgrouptitle_text=None)
+    # ✅ 막대 위에 분 단위 표시
+    fig.update_traces(
+        hovertemplate='%{x}일<br>%{y:.0f}분<br>%{fullData.name}',
+        texttemplate='%{y:.0f}분',  # y값을 정수 분으로 표시
+        textposition='inside'
+    )
     st.plotly_chart(fig, width='stretch', key=getUuid())
 
     audio_df = pd.DataFrame(audio_data)
@@ -341,10 +376,15 @@ def barChart_Day(user_id, st_dt):
                  barmode='stack',  # 병렬 막대
                  title="시간대별 이갈이,코골이 소요시간(분)",
                  text="minutes",
+                 labels={
+                    'hour_slot': '시간대 별',
+                    'minutes': '지속 시간',
+                    'audio_nm': '분류'
+                 },
                  color_discrete_map={
-                     '이갈이': '#1f77b4',
-                     '코골이': '#ff7f0e',
-                     '기타': "#b0cf3f"
+                     '이갈이': color.bruxism,
+                     '코골이': color.snoring,
+                     '기타': color.noise
                  }
                  )
     fig.update_layout(
@@ -360,7 +400,12 @@ def barChart_Day(user_id, st_dt):
         margin=dict(b=200),
         legend_title_text=''
     )
-    fig.update_traces(legendgrouptitle_text="")
+    # ✅ 막대 위에 분 단위 표시
+    fig.update_traces(
+        hovertemplate='%{x}일<br>%{y:.0f}분<br>%{fullData.name}',
+        texttemplate='%{y:.0f}분',  # y값을 정수 분으로 표시
+        textposition='inside'
+    )
     st.plotly_chart(fig, width='stretch', key=getUuid())
 
 
@@ -389,12 +434,17 @@ def barChart_Hour(user_id, st_dt):
                  barmode='stack',  # 병렬 막대
                  title="시간대별 포즈 소요시간(분)",
                  text="minutes",
+                 labels={
+                    'hour_slot': '시간대 별',
+                    'minutes': '지속 시간',
+                    'pose_nm': '자세 명'
+                 },
                  color_discrete_map={
-                     '바로 누운 자세': '#1f77b4',
-                     '옆으로 누워자기': '#ff7f0e',
-                     '팔든 자세': '#2ca02c',
-                     '엎드린 자세': "#9432d6",
-                     '기타': "#b0cf3f"
+                     '바로 누운 자세': color.laying,
+                     '옆으로 누워자기': color.side,
+                     '팔든 자세': color.hand_up,
+                     '엎드린 자세': color.back,
+                     '기타': color.others
                  }
                  )
     fig.update_layout(
@@ -410,7 +460,11 @@ def barChart_Hour(user_id, st_dt):
         margin=dict(b=200),
         legend_title_text = ''
     )
-    fig.update_traces(legendgrouptitle_text="")
+    fig.update_traces(
+        hovertemplate='%{x}시<br>%{y:.0f}분<br>%{fullData.name}',
+        texttemplate='%{y:.0f}분',  # y값을 정수 분으로 표시
+        textposition='inside'
+    )
     st.plotly_chart(fig, width='stretch', key=getUuid())
 
     audio_df = pd.DataFrame(audio_data)
@@ -435,9 +489,9 @@ def barChart_Hour(user_id, st_dt):
                  title="시간대별 이갈이,코골이 소요시간(분)",
                  text="minutes",
                  color_discrete_map={
-                     '이갈이': '#1f77b4',
-                     '코골이': '#ff7f0e',
-                     '기타': "#b0cf3f"
+                     '이갈이': color.bruxism,
+                     '코골이': color.snoring,
+                     '기타': color.noise
                  },
                  )
     fig.update_layout(
@@ -453,7 +507,11 @@ def barChart_Hour(user_id, st_dt):
         margin=dict(b=200),
         legend_title_text=''
     )
-    fig.update_traces(legendgrouptitle_text="")
+    fig.update_traces(
+        hovertemplate='%{x}시<br>%{y:.0f}분<br>%{fullData.name}',
+        texttemplate='%{y:.0f}분',  # y값을 정수 분으로 표시
+        textposition='inside'
+    )
     st.plotly_chart(fig, width='stretch', key=getUuid())
 
 
@@ -486,7 +544,8 @@ def report_window():
         with col2:
             month = st.selectbox("월", months, index=date.today().month - 1)
         with col3:
-            pose_chart = ['1: 월간heatmap', '2: 월간_자세별', '3: 월간_시간별', '4: 월간_일자별']
+            # pose_chart = ['1: 월간heatmap', '2: 월간_자세별', '3: 월간_시간별', '4: 월간_일자별']
+            pose_chart = ['1: 월간_자세별', '2: 월간_시간별', '3: 월간_일자별']
             selected_chart = st.selectbox("그래프 선택", pose_chart, index=0)
         selected_date = f"{year}{month:02d}"
     else:
@@ -501,13 +560,13 @@ def report_window():
     # 필터링 적용
     if selected_chart == "0: 일간gantt":
         ganttchart(user_id, selected_date)
-    elif (selected_chart == "1: 월간heatmap"):
-        heatmapChart(user_id, selected_date)
-    elif (selected_chart == '2: 월간_자세별'):
+    # elif (selected_chart == "1: 월간heatmap"):
+    #     heatmapChart(user_id, selected_date)
+    elif (selected_chart == '1: 월간_자세별'):
         pieChart(user_id, selected_date)
-    elif (selected_chart == '3: 월간_시간별'):
+    elif (selected_chart == '2: 월간_시간별'):
         barChart_Hour(user_id, selected_date)
-    elif (selected_chart == '4: 월간_일자별'):
+    elif (selected_chart == '3: 월간_일자별'):
         barChart_Day(user_id, selected_date)
     st.markdown("---")
     if st.button("🏠 모니터링 화면으로", width='stretch'):
